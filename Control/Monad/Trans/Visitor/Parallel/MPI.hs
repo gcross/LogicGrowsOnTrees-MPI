@@ -9,7 +9,14 @@
 {-# LANGUAGE UnicodeSyntax #-}
 -- }}}
 
-module Control.Monad.Trans.Visitor.Parallel.MPI where
+module Control.Monad.Trans.Visitor.Parallel.MPI
+    ( SupervisorRequests(..)
+    , TerminationReason(..)
+    , runMPI
+    , runVisitor
+    , runVisitorIO
+    , runVisitorT
+    ) where
 
 -- Imports {{{
 import Prelude hiding (catch)
@@ -47,7 +54,7 @@ import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
 
-import Control.Monad.Trans.Visitor
+import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import Control.Monad.Trans.Visitor.Supervisor
 import Control.Monad.Trans.Visitor.Worker
@@ -94,8 +101,8 @@ newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,
 
 -- Exposed Functions {{{
 
-runMPI :: MPI () → IO () -- {{{
-runMPI action = unwrapMPI $ initializeMPI >> (action `finally` finalizeMPI)
+runMPI :: MPI α → IO α -- {{{
+runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 -- }}}
 
 runVisitorIO :: -- {{{
@@ -154,9 +161,8 @@ getMPIInformation = do
             liftM2 (,)
                 (toBool <$> peek p_i_am_supervisor)
                 (peek p_number_of_workers)
-    unless (number_of_workers > 0) $ do
-        finalizeMPI
-        error $ "The number of total processors must be at least 2 so there is at least 1 worker."
+    unless (number_of_workers > 0) $
+        error "The number of total processors must be at least 2 so there is at least 1 worker."
     return (i_am_supervisor,number_of_workers)
 -- }}}
 
@@ -165,9 +171,8 @@ foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_initializeMPI" c_initiali
 initializeMPI =
     liftIO c_initializeMPI
     >>=
-    flip unless (do
-        finalizeMPI
-        error $ "This MPI implementation does not have funneled thread support (i.e., MPI_THREAD_FUNNELED)."
+    flip unless (
+        error "This MPI implementation does not have funneled thread support (i.e., MPI_THREAD_FUNNELED)."
     ) . toBool
 -- }}}
 
