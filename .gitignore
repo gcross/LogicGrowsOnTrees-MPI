@@ -3,4 +3,10 @@ dist
 *.o
 *.*~
 *.hi
-test-trivial
+dest
+
+.DS_Store
+out*
+*.hp
+*.prof
+#*#
