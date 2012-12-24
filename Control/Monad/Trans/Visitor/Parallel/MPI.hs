@@ -274,10 +274,10 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
             (do mapM_ addWorker [1..number_of_workers]
                 let processAllRequests =
                         liftIO (atomically $ tryReadTChan requests) >>=
-                        maybe (return ()) (\request → request >> processAllRequests)
+                        maybe processAllMessages (\request → request >> processAllRequests)
                     processAllMessages =
                         lift tryReceiveMessage >>=
-                        maybe (return ()) (\(worker_id,message) → do
+                        maybe (liftIO yield >> processAllRequests) (\(worker_id,message) → do
                             case message of
                                 Failed description →
                                     error description
@@ -291,10 +291,7 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                                     error $ "Worker " ++ show worker_id ++ " quit prematurely."
                             processAllMessages
                        )
-                forever $ do
-                    processAllRequests
-                    processAllMessages
-                    liftIO yield
+                processAllRequests
             )
         )
         `catch`
