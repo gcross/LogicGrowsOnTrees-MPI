@@ -266,8 +266,6 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                     sendMessage . Workload
             }
     termination_reason ←
-        (either Aborted Completed . visitorSupervisorResultProgress
-         <$>
          runVisitorSupervisorMaybeStartingFrom
             maybe_starting_progress
             supervisor_actions
@@ -280,7 +278,7 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                         maybe (liftIO yield >> processAllRequests) (\(worker_id,message) → do
                             case message of
                                 Failed description →
-                                    error description
+                                    receiveWorkerFailure worker_id description
                                 Finished final_progress →
                                     receiveWorkerFinished worker_id final_progress
                                 ProgressUpdate progress_update →
@@ -293,9 +291,11 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                        )
                 processAllRequests
             )
-        )
-        `catch`
-        (\(e :: SomeException) → return $ Failure (show e))
+        >>= \(VisitorSupervisorResult termination_reason _) → return $ case termination_reason of
+            SupervisorAborted progress → Aborted progress
+            SupervisorCompleted result → Completed result
+            SupervisorFailure worker_id message → Failure $
+                "Process " ++ show worker_id ++ " failed with message: " ++ show message
     mapM_ (sendMessage QuitWorker) [1..number_of_workers]
     let confirmShutdown remaining_workers
           | Set.null remaining_workers = return ()
