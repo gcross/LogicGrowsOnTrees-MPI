@@ -69,6 +69,7 @@ data MessageForSupervisor result = -- {{{
   | ProgressUpdate (VisitorWorkerProgressUpdate result)
   | StolenWorkload (Maybe (VisitorWorkerStolenWorkload result))
   | WorkerQuit
+  deriving (Eq,Show)
 $(derive makeSerialize ''MessageForSupervisor)
 -- }}}
 
@@ -77,6 +78,7 @@ data MessageForWorker result = -- {{{
   | RequestWorkloadSteal
   | Workload VisitorWorkload
   | QuitWorker
+  deriving (Eq,Show)
 $(derive makeSerialize ''MessageForWorker)
 -- }}}
 
@@ -93,6 +95,7 @@ data TerminationReason result = -- {{{
     Aborted (VisitorProgress result)
   | Completed result
   | Failure String
+  deriving (Eq,Show)
 -- }}}
 
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
