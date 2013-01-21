@@ -358,14 +358,12 @@ runWorker spawnWorker = do
             )
           where
             failure = flip sendMessage 0 . (Failed :: String → MessageForSupervisor result)
-            failNoWorkerRunning = failure $
-                "received a worker request when the worker was not running"
             failWorkerAlreadyRunning = failure $
                 "received a workload then the worker was already running"
             processRequest sendRequest constructResponse =
                 liftIO (tryTakeMVar worker_environment)
                 >>=
-                maybe failNoWorkerRunning (
+                maybe (return ()) (
                     \env@VisitorWorkerEnvironment{workerPendingRequests} → liftIO $ do
                         sendRequest workerPendingRequests $ enqueueMessage . constructResponse
                         putMVar worker_environment env
