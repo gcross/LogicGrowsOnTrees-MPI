@@ -54,6 +54,8 @@ import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
 
+import qualified System.Log.Logger as Logger
+
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import Control.Monad.Trans.Visitor.Supervisor
@@ -206,6 +208,14 @@ tryReceiveMessage = liftIO $
 
 -- }}}
 
+-- Logging Functions {{{
+debugM :: MonadIO m ⇒ String → m ()
+debugM = liftIO . Logger.debugM "Worker"
+
+infoM :: MonadIO m ⇒ String → m ()
+infoM = liftIO . Logger.infoM "Worker"
+-- }}}
+
 -- Internal Functions {{{
 
 genericRunVisitor :: -- {{{
@@ -330,6 +340,8 @@ runWorker spawnWorker = do
                         processRequest sendWorkloadStealRequest StolenWorkload
                         processIncomingMessages
                     Workload workload → do
+                        infoM "Received workload."
+                        debugM $ "Workload is: " ++ show workload
                         worker_is_running ← not <$> liftIO (isEmptyMVar worker_environment)
                         if worker_is_running
                             then failWorkerAlreadyRunning

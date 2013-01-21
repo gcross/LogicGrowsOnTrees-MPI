@@ -7,6 +7,7 @@
 import Data.Monoid (Sum(..))
 import Data.Serialize (Serialize(..))
 import System.Environment (getArgs)
+import System.Log.Logger
 
 import Control.Monad.Trans.Visitor.Examples.Queens
 import Control.Monad.Trans.Visitor.Parallel.MPI
@@ -17,6 +18,7 @@ instance Serialize (Sum Int) where
     get = fmap Sum get
 
 main = do
+    -- updateGlobalLogger rootLoggerName (setLevel DEBUG)
     n ← getArgs >>= \args → case map reads args of
             [[(n,"")]]
               | n >= 1 && n <= 18 → return n
