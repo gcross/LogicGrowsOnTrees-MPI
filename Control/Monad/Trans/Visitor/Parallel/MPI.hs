@@ -23,7 +23,7 @@ import Prelude hiding (catch)
 
 import Control.Applicative (Applicative())
 import Control.Arrow ((&&&),second)
-import Control.Concurrent (forkIO,killThread,yield)
+import Control.Concurrent (forkIO,killThread,threadDelay,yield)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TChan
@@ -371,7 +371,7 @@ runWorker spawnWorker = do
         processOutgoingMessages =
             liftIO (atomically $ tryReadTChan outgoing_messages) >>=
             maybe
-                (liftIO yield >> processIncomingMessages)
+                (liftIO (threadDelay 1) >> processIncomingMessages)
                 (\message → sendMessage message 0 >> processOutgoingMessages)
     processIncomingMessages
 -- }}}
