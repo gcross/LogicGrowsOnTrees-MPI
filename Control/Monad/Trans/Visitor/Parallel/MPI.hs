@@ -172,13 +172,8 @@ getMPIInformation = do
 -- }}}
 
 initializeMPI :: MPI () -- {{{
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_initializeMPI" c_initializeMPI :: IO CInt
-initializeMPI =
-    liftIO c_initializeMPI
-    >>=
-    flip unless (
-        error "This MPI implementation does not have funneled thread support (i.e., MPI_THREAD_FUNNELED)."
-    ) . toBool
+foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_initializeMPI" c_initializeMPI :: IO ()
+initializeMPI = liftIO c_initializeMPI
 -- }}}
 
 sendMessage :: Serialize α ⇒ α → CInt → MPI () -- {{{

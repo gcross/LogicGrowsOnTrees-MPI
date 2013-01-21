@@ -16,10 +16,8 @@ void Visitor_MPI_getMPIInformation(int *i_am_supervisor, int *number_of_workers)
     --(*number_of_workers);
 }}}
 
-int Visitor_MPI_initializeMPI() {{{
-    int provided_thread_support;
-    MPI_Init_thread(NULL,NULL,MPI_THREAD_FUNNELED,&provided_thread_support);
-    return (provided_thread_support >= MPI_THREAD_FUNNELED);
+void Visitor_MPI_initializeMPI() {{{
+    MPI_Init(NULL,NULL);
 }}}
 
 void Visitor_MPI_sendMessage(char *message, int size, int destination) {{{
