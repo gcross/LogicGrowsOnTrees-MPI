@@ -321,12 +321,10 @@ runWorker :: -- {{{
     ((VisitorWorkerTerminationReason result → IO ()) → VisitorWorkload → IO (VisitorWorkerEnvironment result)) →
     MPI ()
 runWorker spawnWorker = do
-    outgoing_messages ← liftIO newTChanIO
     worker_environment ← liftIO newEmptyMVar
-    let enqueueMessage = atomically . writeTChan outgoing_messages
-        processIncomingMessages =
+    let processIncomingMessages =
             tryReceiveMessage >>=
-            maybe processOutgoingMessages (\(_,message) →
+            maybe (liftIO (threadDelay 1) >> processIncomingMessages) (\(_,message) →
                 case message of
                     RequestProgressUpdate → do
                         processRequest sendProgressUpdateRequest ProgressUpdate
@@ -346,9 +344,9 @@ runWorker spawnWorker = do
                                         _ ← takeMVar worker_environment
                                         case termination_reason of
                                             VisitorWorkerFinished final_progress →
-                                                enqueueMessage (Finished final_progress :: MessageForSupervisor result)
+                                                unwrapMPI $ sendMessage (Finished final_progress :: MessageForSupervisor result) 0
                                             VisitorWorkerFailed exception →
-                                                enqueueMessage (Failed (show exception))
+                                                unwrapMPI $ sendMessage (Failed (show exception) :: MessageForSupervisor result) 0
                                             VisitorWorkerAborted →
                                                 return ()
                                     )
@@ -372,14 +370,9 @@ runWorker spawnWorker = do
                 >>=
                 maybe (return ()) (
                     \env@VisitorWorkerEnvironment{workerPendingRequests} → liftIO $ do
-                        sendRequest workerPendingRequests $ enqueueMessage . constructResponse
+                        sendRequest workerPendingRequests $ unwrapMPI . flip sendMessage 0 . constructResponse
                         putMVar worker_environment env
                 )
-        processOutgoingMessages =
-            liftIO (atomically $ tryReadTChan outgoing_messages) >>=
-            maybe
-                (liftIO (threadDelay 1) >> processIncomingMessages)
-                (\message → sendMessage message 0 >> processOutgoingMessages)
     processIncomingMessages
 -- }}}
 
