@@ -19,10 +19,11 @@ instance Serialize (Sum Int) where
 
 main = do
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG)
+    let max_n = nqueens_maximum_size
     n ← getArgs >>= \args → case map reads args of
             [[(n,"")]]
-              | n >= 1 && n <= 18 → return n
-              | otherwise → error "board size must be between 1 and 18 inclusive"
+              | n >= 1 && n <= nqueens_maximum_size → return n
+              | otherwise → error $ "board size must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive"
             _ → error "test-nqueens must be called with a single integer argument specifying the board size"
     termination_reason ← runMPI $
         runVisitor
