@@ -365,6 +365,10 @@ runWorker spawnWorker = do
             failure = flip sendMessage 0 . (Failed :: String → MessageForSupervisor result)
             failWorkerAlreadyRunning = failure $
                 "received a workload then the worker was already running"
+            processRequest ::
+                (VisitorWorkerRequestQueue result → (α → IO ()) → IO ()) →
+                (α → MessageForSupervisor result) →
+                MPI ()
             processRequest sendRequest constructResponse =
                 liftIO (tryTakeMVar worker_environment)
                 >>=
