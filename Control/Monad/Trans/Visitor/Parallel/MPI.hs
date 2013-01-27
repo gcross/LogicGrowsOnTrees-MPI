@@ -6,12 +6,12 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UnicodeSyntax #-}
 -- }}}
 
 module Control.Monad.Trans.Visitor.Parallel.MPI
-    ( SupervisorRequests(..)
-    , TerminationReason(..)
+    ( TerminationReason(..)
     , runMPI
     , runVisitor
     , runVisitorIO
@@ -29,10 +29,11 @@ import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TChan
 import Control.Exception (AsyncException(ThreadKilled),SomeException)
 import Control.Monad (forever,forM_,join,liftM2,mapM_,unless,void,when)
-import Control.Monad.CatchIO (MonadCatchIO(),catch,finally)
+import Control.Monad.CatchIO (MonadCatchIO(..),finally)
 import Control.Monad.Fix (MonadFix())
 import Control.Monad.IO.Class (MonadIO(liftIO))
 import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
@@ -59,6 +60,8 @@ import qualified System.Log.Logger as Logger
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import Control.Monad.Trans.Visitor.Supervisor
+import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
+import qualified Control.Monad.Trans.Visitor.Supervisor.RequestQueue.Monad as RQM
 import Control.Monad.Trans.Visitor.Worker
 import Control.Monad.Trans.Visitor.Workload
 -- }}}
@@ -84,15 +87,6 @@ data MessageForWorker result = -- {{{
 $(derive makeSerialize ''MessageForWorker)
 -- }}}
 
-data SupervisorRequests result = -- {{{
-    SupervisorRequests
-    {   requestCurrentProgress :: IO (VisitorProgress result)
-    ,   requestCurrentProgressAsync :: (VisitorProgress result → IO ()) → IO ()
-    ,   requestGlobalProgressUpdate :: IO (VisitorProgress result)
-    ,   requestGlobalProgressUpdateAsync :: (VisitorProgress result → IO ()) → IO ()
-    }
--- }}}
-
 data TerminationReason result = -- {{{
     Aborted (VisitorProgress result)
   | Completed result
@@ -101,6 +95,22 @@ data TerminationReason result = -- {{{
 -- }}}
 
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
+
+type SupervisorMonad result = VisitorSupervisorMonad result CInt MPI
+
+newtype SupervisorControllerMonad result α = C { unwrapC :: RequestQueueReader result CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO)
+
+-- }}}
+
+-- Instances {{{
+
+instance Monoid result ⇒ RQM.RequestQueueMonad (SupervisorControllerMonad result) where -- {{{
+    type RequestQueueMonadResult (SupervisorControllerMonad result) = result
+    abort = C ask >>= abort
+    getCurrentProgressAsync callback = C (ask >>= flip getCurrentProgressAsync callback)
+    getNumberOfWorkersAsync callback = C (ask >>= flip getNumberOfWorkersAsync callback)
+    requestProgressUpdateAsync callback = C (ask >>= flip requestProgressUpdateAsync callback)
+-- }}}
 
 -- }}}
 
@@ -113,7 +123,7 @@ runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 runVisitorIO :: -- {{{
     (Monoid result, Serialize result) ⇒
     (IO (Maybe (VisitorProgress result))) →
-    (SupervisorRequests result → IO ()) →
+    (SupervisorControllerMonad result ()) →
     VisitorIO result →
     MPI (Maybe (TerminationReason result))
 runVisitorIO getStartingProgress runManagerLoop =
@@ -126,7 +136,7 @@ runVisitorT :: -- {{{
     (Monoid result, Serialize result, Functor m, MonadIO m) ⇒
     (∀ α. m α → IO α) →
     (IO (Maybe (VisitorProgress result))) →
-    (SupervisorRequests result → IO ()) →
+    (SupervisorControllerMonad result ()) →
     VisitorT m result →
     MPI (Maybe (TerminationReason result))
 runVisitorT runMonad getStartingProgress runManagerLoop =
@@ -138,7 +148,7 @@ runVisitorT runMonad getStartingProgress runManagerLoop =
 runVisitor :: -- {{{
     (Monoid result, Serialize result) ⇒
     (IO (Maybe (VisitorProgress result))) →
-    (SupervisorRequests result → IO ()) →
+    (SupervisorControllerMonad result ()) →
     Visitor result →
     MPI (Maybe (TerminationReason result))
 runVisitor getStartingProgress runManagerLoop =
@@ -216,7 +226,7 @@ infoM = liftIO . Logger.infoM "Worker"
 genericRunVisitor :: -- {{{
     (Monoid result, Serialize result) ⇒
     (IO (Maybe (VisitorProgress result))) →
-    (SupervisorRequests result → IO ()) →
+    (SupervisorControllerMonad result ()) →
     ((VisitorWorkerTerminationReason result → IO ()) → VisitorWorkload → IO (VisitorWorkerEnvironment result)) →
     MPI (Maybe (TerminationReason result))
 genericRunVisitor getStartingProgress runManagerLoop spawnWorker =
@@ -232,41 +242,18 @@ runSupervisor :: -- {{{
     (Monoid result, Serialize result) ⇒
     CInt →
     (IO (Maybe (VisitorProgress result))) →
-    (SupervisorRequests result → IO ()) →
+    (SupervisorControllerMonad result ()) →
     MPI (TerminationReason result)
 runSupervisor number_of_workers getStartingProgress runManagerLoop = do
-    requests ← liftIO $ newTChanIO
-    progress_receivers ← liftIO $ newIORef []
-    let supervisor_requests = SupervisorRequests
-            {   requestCurrentProgress = requestCurrentProgress_ 
-            ,   requestCurrentProgressAsync = requestCurrentProgressAsync_ 
-            ,   requestGlobalProgressUpdate = requestGlobalProgressUpdate_
-            ,   requestGlobalProgressUpdateAsync = requestGlobalProgressUpdateAsync_
-            }
-          where
-            requestCurrentProgress_ = do
-                current_progress ← IVar.new
-                requestCurrentProgressAsync_ (IVar.write current_progress)
-                IVar.blocking . IVar.read $ current_progress
-            requestCurrentProgressAsync_ receiveProgress =
-                atomically . writeTChan requests $
-                    getCurrentProgress >>= liftIO . receiveProgress
-            requestGlobalProgressUpdate_ = do
-                current_progress ← IVar.new
-                requestGlobalProgressUpdateAsync_ (IVar.write current_progress)
-                IVar.blocking . IVar.read $ current_progress
-            requestGlobalProgressUpdateAsync_ receiveProgress = do
-                atomicModifyIORef progress_receivers ((receiveProgress:) &&& const ())
-                atomically . writeTChan requests $ performGlobalProgressUpdate
-    _ ← liftIO $ forkIO (runManagerLoop supervisor_requests)
+    request_queue ← newRequestQueue
+    _ ← liftIO . forkIO $ runReaderT (unwrapC runManagerLoop) request_queue
     maybe_starting_progress ← liftIO getStartingProgress
     let supervisor_actions = VisitorSupervisorActions
             {   broadcast_progress_update_to_workers_action =
                     mapM_ (sendMessage RequestProgressUpdate)
             ,   broadcast_workload_steal_to_workers_action =
                     mapM_ (sendMessage RequestWorkloadSteal)
-            ,   receive_current_progress_action = \progress → do
-                    liftIO $ atomicModifyIORef progress_receivers (const [] &&& id) >>= mapM_ ($ progress)
+            ,   receive_current_progress_action = receiveProgress request_queue
             ,   send_workload_to_worker_action =
                     sendMessage . Workload
             }
@@ -275,12 +262,9 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
             maybe_starting_progress
             supervisor_actions
             (do mapM_ addWorker [1..number_of_workers]
-                let processAllRequests =
-                        liftIO (atomically $ tryReadTChan requests) >>=
-                        maybe processAllMessages (\request → request >> processAllRequests)
-                    processAllMessages =
-                        lift tryReceiveMessage >>=
-                        maybe (liftIO yield >> processAllRequests) (\(worker_id,message) → do
+                forever $ do
+                    lift tryReceiveMessage >>=
+                        maybe (liftIO yield) (\(worker_id,message) → do
                             case message of
                                 Failed description →
                                     receiveWorkerFailure worker_id description
@@ -292,9 +276,8 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                                     receiveStolenWorkload worker_id maybe_stolen_workload
                                 WorkerQuit →
                                     error $ "Worker " ++ show worker_id ++ " quit prematurely."
-                            processAllMessages
-                       )
-                processAllRequests
+                        )
+                    processAllRequests request_queue
             )
         >>= \(VisitorSupervisorResult termination_reason _) → return $ case termination_reason of
             SupervisorAborted progress → Aborted progress

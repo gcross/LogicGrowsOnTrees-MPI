@@ -28,7 +28,7 @@ main = do
     termination_reason ← runMPI $
         runVisitor
             (return Nothing)
-            (const $ return ())
+            (return ())
             (nqueensCount n)
     case termination_reason of
         Nothing → return ()

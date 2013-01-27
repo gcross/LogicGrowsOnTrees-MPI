@@ -10,7 +10,7 @@ main =
     (runMPI $
         runVisitor
             (return Nothing)
-            (const $ return ())
+            (return ())
             (return [()])
     ) >>= (\x → case x of
         Nothing → return ()
