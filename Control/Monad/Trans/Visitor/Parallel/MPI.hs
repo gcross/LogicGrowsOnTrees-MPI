@@ -61,7 +61,6 @@ import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import Control.Monad.Trans.Visitor.Supervisor
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
-import qualified Control.Monad.Trans.Visitor.Supervisor.RequestQueue.Monad as RQM
 import Control.Monad.Trans.Visitor.Worker
 import Control.Monad.Trans.Visitor.Workload
 -- }}}
@@ -104,12 +103,12 @@ newtype SupervisorControllerMonad result α = C { unwrapC :: RequestQueueReader 
 
 -- Instances {{{
 
-instance Monoid result ⇒ RQM.RequestQueueMonad (SupervisorControllerMonad result) where -- {{{
+instance Monoid result ⇒ RequestQueueMonad (SupervisorControllerMonad result) where -- {{{
     type RequestQueueMonadResult (SupervisorControllerMonad result) = result
-    abort = C ask >>= abort
-    getCurrentProgressAsync callback = C (ask >>= flip getCurrentProgressAsync callback)
-    getNumberOfWorkersAsync callback = C (ask >>= flip getNumberOfWorkersAsync callback)
-    requestProgressUpdateAsync callback = C (ask >>= flip requestProgressUpdateAsync callback)
+    abort = C abort
+    getCurrentProgressAsync = C . getCurrentProgressAsync
+    getNumberOfWorkersAsync = C . getNumberOfWorkersAsync
+    requestProgressUpdateAsync = C . requestProgressUpdateAsync
 -- }}}
 
 -- }}}
