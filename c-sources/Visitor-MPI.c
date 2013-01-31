@@ -20,6 +20,17 @@ void Visitor_MPI_initializeMPI() {{{
     MPI_Init(NULL,NULL);
 }}}
 
+void Visitor_MPI_receiveBroadcastMessage(char **message, int *size) {{{
+    MPI_Bcast(size,1,MPI_INT,0,MPI_COMM_WORLD);
+    *message = (char*)malloc((size_t)*size);
+    MPI_Bcast(*message,*size,MPI_CHAR,0,MPI_COMM_WORLD);
+}}}
+
+void Visitor_MPI_sendBroadcastMessage(char *message, int size) {{{
+    MPI_Bcast(&size,1,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Bcast(message,size,MPI_CHAR,0,MPI_COMM_WORLD);
+}}}
+
 void Visitor_MPI_sendMessage(char *message, int size, int destination) {{{
     MPI_Send(message,size,MPI_CHAR,destination,0,MPI_COMM_WORLD);
 }}}

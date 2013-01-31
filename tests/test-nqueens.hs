@@ -19,17 +19,18 @@ instance Serialize (Sum Int) where
 
 main = do
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG)
-    let max_n = nqueens_maximum_size
-    n ← getArgs >>= \args → case map reads args of
-            [[(n,"")]]
-              | n >= 1 && n <= nqueens_maximum_size → return n
-              | otherwise → error $ "board size must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive"
-            _ → error "test-nqueens must be called with a single integer argument specifying the board size"
-    termination_reason ← runMPI $
+    runMPI $
         runVisitor
-            (return Nothing)
-            (return ())
-            (nqueensCount n)
+            (getArgs >>= \args → case map reads args of
+                [[(n,"")]]
+                  | n >= 1 && n <= nqueens_maximum_size → return n
+                  | otherwise → error $ "board size must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive"
+                _ → error "test-nqueens must be called with a single integer argument specifying the board size"
+            )
+            (const $ return Nothing)
+            (const $ return ())
+             nqueensCount
+    >>= \(n,termination_reason) →
     case termination_reason of
         Nothing → return ()
         Just (Aborted progress) → error $ "Visitor aborted with progress " ++ show progress ++ "."

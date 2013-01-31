@@ -9,10 +9,11 @@ import Control.Monad.Trans.Visitor.Parallel.MPI
 main =
     (runMPI $
         runVisitor
-            (return Nothing)
             (return ())
-            (return [()])
-    ) >>= (\x → case x of
+            (const $ return Nothing)
+            (const $ return ())
+            (const $ return [()])
+    ) >>= (\((),x) → case x of
         Nothing → return ()
         Just (Aborted progress) → error $ "Visitor aborted with progress " ++ show progress ++ "."
         Just (Completed [()]) → putStrLn $ "Trivial search completed successfully."

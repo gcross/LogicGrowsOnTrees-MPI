@@ -27,7 +27,7 @@ import Control.Concurrent (forkIO,killThread,threadDelay,yield)
 import Control.Concurrent.MVar
 import Control.Concurrent.STM (atomically)
 import Control.Concurrent.STM.TChan
-import Control.Exception (AsyncException(ThreadKilled),SomeException)
+import Control.Exception (AsyncException(ThreadKilled),SomeException,onException,throwIO)
 import Control.Monad (forever,forM_,join,liftM2,mapM_,unless,void,when)
 import Control.Monad.CatchIO (MonadCatchIO(..),finally)
 import Control.Monad.Fix (MonadFix())
@@ -119,41 +119,53 @@ runMPI :: MPI α → IO α -- {{{
 runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 -- }}}
 
+runVisitor :: -- {{{
+    (Serialize configuration, Monoid result, Serialize result) ⇒
+    IO configuration →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → Visitor result) →
+    MPI (configuration,Maybe (TerminationReason result))
+runVisitor getConfiguration getStartingProgress constructManager constructVisitor =
+    genericRunVisitor
+        getConfiguration
+        getStartingProgress
+        constructManager
+        constructVisitor
+        forkVisitorWorkerThread
+-- }}}
+
 runVisitorIO :: -- {{{
-    (Monoid result, Serialize result) ⇒
-    (IO (Maybe (VisitorProgress result))) →
-    (SupervisorControllerMonad result ()) →
-    VisitorIO result →
-    MPI (Maybe (TerminationReason result))
-runVisitorIO getStartingProgress runManagerLoop =
-    genericRunVisitor getStartingProgress runManagerLoop
-    .
-    flip forkVisitorIOWorkerThread
+    (Serialize configuration, Monoid result, Serialize result) ⇒
+    IO configuration →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → VisitorIO result) →
+    MPI (configuration,Maybe (TerminationReason result))
+runVisitorIO getConfiguration getStartingProgress constructManager constructVisitor =
+    genericRunVisitor
+        getConfiguration
+        getStartingProgress
+        constructManager
+        constructVisitor
+        forkVisitorIOWorkerThread
 -- }}}
 
 runVisitorT :: -- {{{
-    (Monoid result, Serialize result, Functor m, MonadIO m) ⇒
+    (Serialize configuration, Monoid result, Serialize result, Functor m, MonadIO m) ⇒
     (∀ α. m α → IO α) →
-    (IO (Maybe (VisitorProgress result))) →
-    (SupervisorControllerMonad result ()) →
-    VisitorT m result →
-    MPI (Maybe (TerminationReason result))
-runVisitorT runMonad getStartingProgress runManagerLoop =
-    genericRunVisitor getStartingProgress runManagerLoop
-    .
-    flip (forkVisitorTWorkerThread runMonad)
--- }}}
-
-runVisitor :: -- {{{
-    (Monoid result, Serialize result) ⇒
-    (IO (Maybe (VisitorProgress result))) →
-    (SupervisorControllerMonad result ()) →
-    Visitor result →
-    MPI (Maybe (TerminationReason result))
-runVisitor getStartingProgress runManagerLoop =
-    genericRunVisitor getStartingProgress runManagerLoop
-    .
-    flip forkVisitorWorkerThread
+    IO configuration →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → VisitorT m result) →
+    MPI (configuration,Maybe (TerminationReason result))
+runVisitorT runInBase getConfiguration getStartingProgress constructManager constructVisitor =
+    genericRunVisitor
+        getConfiguration
+        getStartingProgress
+        constructManager
+        constructVisitor
+        (forkVisitorTWorkerThread runInBase)
 -- }}}
 
 -- }}}
@@ -183,6 +195,26 @@ getMPIInformation = do
 initializeMPI :: MPI () -- {{{
 foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_initializeMPI" c_initializeMPI :: IO ()
 initializeMPI = liftIO c_initializeMPI
+-- }}}
+
+receiveBroadcastMessage :: Serialize α ⇒ MPI α -- {{{
+foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_receiveBroadcastMessage" c_receiveBroadcastMessage :: Ptr (Ptr CChar) → Ptr CInt → IO ()
+receiveBroadcastMessage = liftIO $
+    alloca $ \p_p_message →
+    alloca $ \p_size → do
+        c_receiveBroadcastMessage p_p_message p_size
+        p_message ← peek p_p_message
+        size ← fromIntegral <$> peek p_size
+        message ← packCStringLen (p_message,fromIntegral size)
+        free p_message
+        return . either error id . decode $ message
+-- }}}
+
+sendBroadcastMessage :: Serialize α ⇒ α → MPI () -- {{{
+foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_sendBroadcastMessage" c_sendBroadcastMessage :: Ptr CChar → CInt → IO ()
+sendBroadcastMessage message = liftIO $
+    unsafeUseAsCStringLen (encode message) $ \(p_message,size) →
+        c_sendBroadcastMessage p_message (fromIntegral size)
 -- }}}
 
 sendMessage :: Serialize α ⇒ α → CInt → MPI () -- {{{
@@ -223,30 +255,40 @@ infoM = liftIO . Logger.infoM "Worker"
 -- Internal Functions {{{
 
 genericRunVisitor :: -- {{{
-    (Monoid result, Serialize result) ⇒
-    (IO (Maybe (VisitorProgress result))) →
-    (SupervisorControllerMonad result ()) →
-    ((VisitorWorkerTerminationReason result → IO ()) → VisitorWorkload → IO (VisitorWorkerEnvironment result)) →
-    MPI (Maybe (TerminationReason result))
-genericRunVisitor getStartingProgress runManagerLoop spawnWorker =
+    (Serialize configuration, Monoid result, Serialize result) ⇒
+    IO configuration →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → visitor) →
+    (
+        (VisitorWorkerTerminationReason result → IO ()) →
+        visitor →
+        VisitorWorkload →
+        IO (VisitorWorkerEnvironment result)
+    ) →
+    MPI (configuration,Maybe (TerminationReason result))
+genericRunVisitor getConfiguration getStartingProgress constructManager constructVisitor forkWorkerThread =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
         if i_am_supervisor
-            then Just <$> runSupervisor number_of_workers getStartingProgress runManagerLoop
-            else runWorker spawnWorker >> return Nothing
+            then second Just <$> runSupervisor number_of_workers getConfiguration getStartingProgress constructManager
+            else (,Nothing) <$> runWorker constructVisitor forkWorkerThread
 -- }}}
 
 runSupervisor :: -- {{{
-    ∀ result.
-    (Monoid result, Serialize result) ⇒
+    ∀ configuration result.
+    (Serialize configuration, Monoid result, Serialize result) ⇒
     CInt →
-    (IO (Maybe (VisitorProgress result))) →
-    (SupervisorControllerMonad result ()) →
-    MPI (TerminationReason result)
-runSupervisor number_of_workers getStartingProgress runManagerLoop = do
+    IO configuration →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    MPI (configuration,TerminationReason result)
+runSupervisor number_of_workers getConfiguration getStartingProgress constructManager = do
+    configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
+    sendBroadcastMessage (Just configuration)
+    maybe_starting_progress ← liftIO (getStartingProgress configuration)
     request_queue ← newRequestQueue
-    _ ← liftIO . forkIO $ runReaderT (unwrapC runManagerLoop) request_queue
-    maybe_starting_progress ← liftIO getStartingProgress
+    _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
     let supervisor_actions = VisitorSupervisorActions
             {   broadcast_progress_update_to_workers_action =
                     mapM_ (sendMessage RequestProgressUpdate)
@@ -257,7 +299,7 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                     sendMessage . Workload
             }
     termination_reason ←
-         runVisitorSupervisorMaybeStartingFrom
+        runVisitorSupervisorMaybeStartingFrom
             maybe_starting_progress
             supervisor_actions
             (do mapM_ addWorker [1..number_of_workers]
@@ -294,15 +336,23 @@ runSupervisor number_of_workers getStartingProgress runManagerLoop = do
                     _ → confirmShutdown remaining_workers
             )
     confirmShutdown $ Set.fromList [1..number_of_workers]
-    return termination_reason
+    return (configuration,termination_reason)
 -- }}}
 
 runWorker :: -- {{{
-    ∀ result.
-    (Monoid result, Serialize result) ⇒
-    ((VisitorWorkerTerminationReason result → IO ()) → VisitorWorkload → IO (VisitorWorkerEnvironment result)) →
-    MPI ()
-runWorker spawnWorker = do
+    ∀ configuration result visitor.
+    (Serialize configuration, Monoid result, Serialize result) ⇒
+    (configuration → visitor) →
+    (
+        (VisitorWorkerTerminationReason result → IO ()) →
+        visitor →
+        VisitorWorkload →
+        IO (VisitorWorkerEnvironment result)
+    ) →
+    MPI configuration
+runWorker constructVisitor forkWorkerThread = do
+    configuration ← receiveBroadcastMessage >>= maybe (liftIO $ throwIO ThreadKilled) return
+    let visitor = constructVisitor configuration
     worker_environment ← liftIO newEmptyMVar
     let processIncomingMessages =
             tryReceiveMessage >>=
@@ -321,7 +371,7 @@ runWorker spawnWorker = do
                         if worker_is_running
                             then failWorkerAlreadyRunning
                             else liftIO $
-                                spawnWorker
+                                forkWorkerThread
                                     (\termination_reason → do
                                         _ ← takeMVar worker_environment
                                         case termination_reason of
@@ -332,6 +382,7 @@ runWorker spawnWorker = do
                                             VisitorWorkerAborted →
                                                 return ()
                                     )
+                                    visitor
                                     workload
                                  >>=
                                  putMVar worker_environment
@@ -342,6 +393,8 @@ runWorker spawnWorker = do
                             tryTakeMVar worker_environment
                             >>=
                             maybe (return ()) (killThread . workerThreadId)
+                            >>
+                            return configuration
             )
           where
             failure = flip sendMessage 0 . (Failed :: String → MessageForSupervisor result)
