@@ -42,7 +42,7 @@ import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.Composition ((.****),(.*****))
+import Data.Composition ((.*****),(.******))
 import Data.Derive.Serialize
 import Data.DeriveTH
 import Data.Functor ((<$>))
@@ -59,6 +59,8 @@ import Foreign.Marshal.Alloc (alloca,free)
 import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
+
+import Options.Applicative (InfoMod,execParser,info)
 
 import qualified System.Log.Logger as Logger
 
@@ -120,9 +122,9 @@ driver :: ∀ configuration result. (Monoid result, Serialize configuration) ⇒
 driver = 
     case (driverMPI :: Driver MPI configuration result) of
         Driver{..} → Driver
-            (runMPI .**** driverRunVisitor)
-            (runMPI .**** driverRunVisitorIO)
-            (runMPI .***** driverRunVisitorT)
+            (runMPI .***** driverRunVisitor)
+            (runMPI .***** driverRunVisitorIO)
+            (runMPI .****** driverRunVisitorT)
 -- }}}
 
 driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration result -- {{{
@@ -132,8 +134,8 @@ driverMPI = Driver
     (genericDriver runVisitorIO)
     (genericDriver . runVisitorT)
   where
-    genericDriver run getConfiguration getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
-        run getConfiguration
+    genericDriver run configuration_parser (infomod :: ∀ α. InfoMod α) getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
+        run (execParser (info configuration_parser infomod))
             getMaybeStartingProgress
             constructManager
             constructVisitor

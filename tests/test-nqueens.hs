@@ -6,7 +6,7 @@
 -- Imports {{{
 import Control.Monad ((>=>))
 
-import Data.Monoid (Sum(..))
+import Data.Monoid (Sum(..),mempty)
 import Data.Serialize (Serialize(..))
 
 import Options.Applicative
@@ -28,6 +28,7 @@ main =
              <> help ("board size (must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive)")
             )
         )
+        mempty
         (\n termination_reason →
             case termination_reason of
                 Aborted progress → error $ "Visitor aborted with progress " ++ show progress ++ "."
