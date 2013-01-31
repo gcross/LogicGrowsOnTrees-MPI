@@ -1,8 +1,10 @@
 -- Language extensions {{{
 {-# LANGUAGE ForeignFunctionInterface #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE TupleSections #-}
@@ -12,6 +14,8 @@
 
 module Control.Monad.Trans.Visitor.Parallel.MPI
     ( TerminationReason(..)
+    , driver
+    , driverMPI
     , runMPI
     , runVisitor
     , runVisitorIO
@@ -38,6 +42,7 @@ import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
+import Data.Composition ((.****),(.*****))
 import Data.Derive.Serialize
 import Data.DeriveTH
 import Data.Functor ((<$>))
@@ -60,6 +65,7 @@ import qualified System.Log.Logger as Logger
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import Control.Monad.Trans.Visitor.Supervisor
+import Control.Monad.Trans.Visitor.Supervisor.Driver
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
 import Control.Monad.Trans.Visitor.Worker
 import Control.Monad.Trans.Visitor.Workload
@@ -86,13 +92,6 @@ data MessageForWorker result = -- {{{
 $(derive makeSerialize ''MessageForWorker)
 -- }}}
 
-data TerminationReason result = -- {{{
-    Aborted (VisitorProgress result)
-  | Completed result
-  | Failure String
-  deriving (Eq,Show)
--- }}}
-
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
 
 type SupervisorMonad result = VisitorSupervisorMonad result CInt MPI
@@ -106,9 +105,40 @@ newtype SupervisorControllerMonad result α = C { unwrapC :: RequestQueueReader 
 instance Monoid result ⇒ RequestQueueMonad (SupervisorControllerMonad result) where -- {{{
     type RequestQueueMonadResult (SupervisorControllerMonad result) = result
     abort = C abort
+    fork = C . fork . unwrapC
     getCurrentProgressAsync = C . getCurrentProgressAsync
     getNumberOfWorkersAsync = C . getNumberOfWorkersAsync
     requestProgressUpdateAsync = C . requestProgressUpdateAsync
+-- }}}
+
+-- }}}
+
+-- Drivers {{{
+
+driver :: ∀ configuration result. (Monoid result, Serialize configuration) ⇒ Driver IO configuration result -- {{{
+ -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
+driver = 
+    case (driverMPI :: Driver MPI configuration result) of
+        Driver{..} → Driver
+            (runMPI .**** driverRunVisitor)
+            (runMPI .**** driverRunVisitorIO)
+            (runMPI .***** driverRunVisitorT)
+-- }}}
+
+driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration result -- {{{
+ -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
+driverMPI = Driver
+    (genericDriver runVisitor)
+    (genericDriver runVisitorIO)
+    (genericDriver . runVisitorT)
+  where
+    genericDriver run getConfiguration getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
+        run getConfiguration
+            getMaybeStartingProgress
+            constructManager
+            constructVisitor
+        >>=
+        maybe (return ()) (liftIO . uncurry notifyTerminated)
 -- }}}
 
 -- }}}
@@ -125,7 +155,7 @@ runVisitor :: -- {{{
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → Visitor result) →
-    MPI (configuration,Maybe (TerminationReason result))
+    MPI (Maybe (configuration,TerminationReason result))
 runVisitor getConfiguration getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
@@ -141,7 +171,7 @@ runVisitorIO :: -- {{{
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorIO result) →
-    MPI (configuration,Maybe (TerminationReason result))
+    MPI (Maybe (configuration,TerminationReason result))
 runVisitorIO getConfiguration getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
@@ -158,7 +188,7 @@ runVisitorT :: -- {{{
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorT m result) →
-    MPI (configuration,Maybe (TerminationReason result))
+    MPI (Maybe (configuration,TerminationReason result))
 runVisitorT runInBase getConfiguration getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
@@ -266,13 +296,13 @@ genericRunVisitor :: -- {{{
         VisitorWorkload →
         IO (VisitorWorkerEnvironment result)
     ) →
-    MPI (configuration,Maybe (TerminationReason result))
+    MPI (Maybe (configuration,TerminationReason result))
 genericRunVisitor getConfiguration getStartingProgress constructManager constructVisitor forkWorkerThread =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
         if i_am_supervisor
-            then second Just <$> runSupervisor number_of_workers getConfiguration getStartingProgress constructManager
-            else (,Nothing) <$> runWorker constructVisitor forkWorkerThread
+            then Just <$> runSupervisor number_of_workers getConfiguration getStartingProgress constructManager
+            else runWorker constructVisitor forkWorkerThread >> return Nothing
 -- }}}
 
 runSupervisor :: -- {{{
@@ -349,9 +379,12 @@ runWorker :: -- {{{
         VisitorWorkload →
         IO (VisitorWorkerEnvironment result)
     ) →
-    MPI configuration
+    MPI ()
 runWorker constructVisitor forkWorkerThread = do
-    configuration ← receiveBroadcastMessage >>= maybe (liftIO $ throwIO ThreadKilled) return
+  receiveBroadcastMessage
+  >>=
+  maybe (return ())
+  (\configuration → do
     let visitor = constructVisitor configuration
     worker_environment ← liftIO newEmptyMVar
     let processIncomingMessages =
@@ -393,8 +426,6 @@ runWorker constructVisitor forkWorkerThread = do
                             tryTakeMVar worker_environment
                             >>=
                             maybe (return ()) (killThread . workerThreadId)
-                            >>
-                            return configuration
             )
           where
             failure = flip sendMessage 0 . (Failed :: String → MessageForSupervisor result)
@@ -413,6 +444,7 @@ runWorker constructVisitor forkWorkerThread = do
                         putMVar worker_environment env
                 )
     processIncomingMessages
+  )
 -- }}}
 
 -- }}}
