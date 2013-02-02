@@ -45,6 +45,7 @@ import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
 import Data.Composition ((.*****),(.******))
 import Data.Derive.Serialize
 import Data.DeriveTH
+import Data.Function (fix)
 import Data.Functor ((<$>))
 import Data.IORef
 import qualified Data.IVar as IVar
@@ -70,29 +71,12 @@ import Control.Monad.Trans.Visitor.Supervisor
 import Control.Monad.Trans.Visitor.Supervisor.Driver
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
 import Control.Monad.Trans.Visitor.Worker
+import qualified Control.Monad.Trans.Visitor.Worker.Process as Process
+import Control.Monad.Trans.Visitor.Worker.Process (MessageForSupervisor(..),MessageForWorker(..),processServerMessage)
 import Control.Monad.Trans.Visitor.Workload
 -- }}}
 
 -- Types {{{
-
-data MessageForSupervisor result = -- {{{
-    Failed String
-  | Finished (VisitorProgress result)
-  | ProgressUpdate (VisitorWorkerProgressUpdate result)
-  | StolenWorkload (Maybe (VisitorWorkerStolenWorkload result))
-  | WorkerQuit
-  deriving (Eq,Show)
-$(derive makeSerialize ''MessageForSupervisor)
--- }}}
-
-data MessageForWorker result = -- {{{
-    RequestProgressUpdate
-  | RequestWorkloadSteal
-  | Workload VisitorWorkload
-  | QuitWorker
-  deriving (Eq,Show)
-$(derive makeSerialize ''MessageForWorker)
--- }}}
 
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
 
@@ -276,14 +260,6 @@ tryReceiveMessage = liftIO $
 
 -- }}}
 
--- Logging Functions {{{
-debugM :: MonadIO m ⇒ String → m ()
-debugM = liftIO . Logger.debugM "Worker"
-
-infoM :: MonadIO m ⇒ String → m ()
-infoM = liftIO . Logger.infoM "Worker"
--- }}}
-
 -- Internal Functions {{{
 
 genericRunVisitor :: -- {{{
@@ -336,20 +312,7 @@ runSupervisor number_of_workers getConfiguration getStartingProgress constructMa
             supervisor_actions
             (do mapM_ addWorker [1..number_of_workers]
                 forever $ do
-                    lift tryReceiveMessage >>=
-                        maybe (liftIO yield) (\(worker_id,message) → do
-                            case message of
-                                Failed description →
-                                    receiveWorkerFailure worker_id description
-                                Finished final_progress →
-                                    receiveWorkerFinished worker_id final_progress
-                                ProgressUpdate progress_update →
-                                    receiveProgressUpdate worker_id progress_update
-                                StolenWorkload maybe_stolen_workload →
-                                    receiveStolenWorkload worker_id maybe_stolen_workload
-                                WorkerQuit →
-                                    error $ "Worker " ++ show worker_id ++ " quit prematurely."
-                        )
+                    lift tryReceiveMessage >>= maybe (liftIO yield) (uncurry processServerMessage)
                     processAllRequests request_queue
             )
         >>= \(VisitorSupervisorResult termination_reason _) → return $ case termination_reason of
@@ -372,7 +335,6 @@ runSupervisor number_of_workers getConfiguration getStartingProgress constructMa
 -- }}}
 
 runWorker :: -- {{{
-    ∀ configuration result visitor.
     (Serialize configuration, Monoid result, Serialize result) ⇒
     (configuration → visitor) →
     (
@@ -382,71 +344,21 @@ runWorker :: -- {{{
         IO (VisitorWorkerEnvironment result)
     ) →
     MPI ()
-runWorker constructVisitor forkWorkerThread = do
-  receiveBroadcastMessage
-  >>=
-  maybe (return ())
-  (\configuration → do
-    let visitor = constructVisitor configuration
-    worker_environment ← liftIO newEmptyMVar
-    let processIncomingMessages =
-            tryReceiveMessage >>=
-            maybe (liftIO (threadDelay 1) >> processIncomingMessages) (\(_,message) →
-                case message of
-                    RequestProgressUpdate → do
-                        processRequest sendProgressUpdateRequest ProgressUpdate
-                        processIncomingMessages
-                    RequestWorkloadSteal → do
-                        processRequest sendWorkloadStealRequest StolenWorkload
-                        processIncomingMessages
-                    Workload workload → do
-                        infoM "Received workload."
-                        debugM $ "Workload is: " ++ show workload
-                        worker_is_running ← not <$> liftIO (isEmptyMVar worker_environment)
-                        if worker_is_running
-                            then failWorkerAlreadyRunning
-                            else liftIO $
-                                forkWorkerThread
-                                    (\termination_reason → do
-                                        _ ← takeMVar worker_environment
-                                        case termination_reason of
-                                            VisitorWorkerFinished final_progress →
-                                                unwrapMPI $ sendMessage (Finished final_progress :: MessageForSupervisor result) 0
-                                            VisitorWorkerFailed exception →
-                                                unwrapMPI $ sendMessage (Failed (show exception) :: MessageForSupervisor result) 0
-                                            VisitorWorkerAborted →
-                                                return ()
-                                    )
-                                    visitor
-                                    workload
-                                 >>=
-                                 putMVar worker_environment
-                        processIncomingMessages
-                    QuitWorker → do
-                        sendMessage (WorkerQuit :: MessageForSupervisor result) 0
-                        liftIO $
-                            tryTakeMVar worker_environment
-                            >>=
-                            maybe (return ()) (killThread . workerThreadId)
-            )
-          where
-            failure = flip sendMessage 0 . (Failed :: String → MessageForSupervisor result)
-            failWorkerAlreadyRunning = failure $
-                "received a workload then the worker was already running"
-            processRequest ::
-                (VisitorWorkerRequestQueue result → (α → IO ()) → IO ()) →
-                (α → MessageForSupervisor result) →
-                MPI ()
-            processRequest sendRequest constructResponse =
-                liftIO (tryTakeMVar worker_environment)
-                >>=
-                maybe (return ()) (
-                    \env@VisitorWorkerEnvironment{workerPendingRequests} → liftIO $ do
-                        sendRequest workerPendingRequests $ unwrapMPI . flip sendMessage 0 . constructResponse
-                        putMVar worker_environment env
-                )
-    processIncomingMessages
-  )
+runWorker constructVisitor forkWorkerThread =
+    receiveBroadcastMessage
+    >>=
+    maybe (return ())
+    (
+        liftIO
+        .
+        Process.runWorker
+            (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
+            (unwrapMPI . flip sendMessage 0)
+        .
+        flip forkWorkerThread
+        .
+        constructVisitor
+    )
 -- }}}
 
 -- }}}
