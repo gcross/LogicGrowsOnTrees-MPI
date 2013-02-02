@@ -42,7 +42,7 @@ import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.Composition ((.*****),(.******))
+import Data.Composition ((.******),(.*******))
 import Data.Derive.Serialize
 import Data.DeriveTH
 import Data.Function (fix)
@@ -106,9 +106,9 @@ driver :: ∀ configuration result. (Monoid result, Serialize configuration) ⇒
 driver = 
     case (driverMPI :: Driver MPI configuration result) of
         Driver{..} → Driver
-            (runMPI .***** driverRunVisitor)
-            (runMPI .***** driverRunVisitorIO)
-            (runMPI .****** driverRunVisitorT)
+            (runMPI .****** driverRunVisitor)
+            (runMPI .****** driverRunVisitorIO)
+            (runMPI .******* driverRunVisitorT)
 -- }}}
 
 driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration result -- {{{
@@ -118,8 +118,9 @@ driverMPI = Driver
     (genericDriver runVisitorIO)
     (genericDriver . runVisitorT)
   where
-    genericDriver run configuration_parser (infomod :: ∀ α. InfoMod α) getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
+    genericDriver run configuration_parser (infomod :: ∀ α. InfoMod α) initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
         run (execParser (info configuration_parser infomod))
+            initializeGlobalState
             getMaybeStartingProgress
             constructManager
             constructVisitor
@@ -138,13 +139,15 @@ runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 runVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
+    (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → Visitor result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitor getConfiguration getStartingProgress constructManager constructVisitor =
+runVisitor getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
+        initializeGlobalState
         getStartingProgress
         constructManager
         constructVisitor
@@ -154,13 +157,15 @@ runVisitor getConfiguration getStartingProgress constructManager constructVisito
 runVisitorIO :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
+    (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorIO result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitorIO getConfiguration getStartingProgress constructManager constructVisitor =
+runVisitorIO getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
+        initializeGlobalState
         getStartingProgress
         constructManager
         constructVisitor
@@ -171,13 +176,15 @@ runVisitorT :: -- {{{
     (Serialize configuration, Monoid result, Serialize result, Functor m, MonadIO m) ⇒
     (∀ α. m α → IO α) →
     IO configuration →
+    (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorT m result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitorT runInBase getConfiguration getStartingProgress constructManager constructVisitor =
+runVisitorT runInBase getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
     genericRunVisitor
         getConfiguration
+        initializeGlobalState
         getStartingProgress
         constructManager
         constructVisitor
@@ -265,6 +272,7 @@ tryReceiveMessage = liftIO $
 genericRunVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
+    (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → visitor) →
@@ -275,12 +283,12 @@ genericRunVisitor :: -- {{{
         IO (VisitorWorkerEnvironment result)
     ) →
     MPI (Maybe (configuration,TerminationReason result))
-genericRunVisitor getConfiguration getStartingProgress constructManager constructVisitor forkWorkerThread =
+genericRunVisitor getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor forkWorkerThread =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
         if i_am_supervisor
-            then Just <$> runSupervisor number_of_workers getConfiguration getStartingProgress constructManager
-            else runWorker constructVisitor forkWorkerThread >> return Nothing
+            then Just <$> runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager
+            else runWorker initializeGlobalState constructVisitor forkWorkerThread >> return Nothing
 -- }}}
 
 runSupervisor :: -- {{{
@@ -288,12 +296,14 @@ runSupervisor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     CInt →
     IO configuration →
+    (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
     (configuration → SupervisorControllerMonad result ()) →
     MPI (configuration,TerminationReason result)
-runSupervisor number_of_workers getConfiguration getStartingProgress constructManager = do
+runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
     configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
     sendBroadcastMessage (Just configuration)
+    liftIO $ initializeGlobalState configuration
     maybe_starting_progress ← liftIO (getStartingProgress configuration)
     request_queue ← newRequestQueue
     _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
@@ -336,6 +346,7 @@ runSupervisor number_of_workers getConfiguration getStartingProgress constructMa
 
 runWorker :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
+    (configuration → IO ()) →
     (configuration → visitor) →
     (
         (VisitorWorkerTerminationReason result → IO ()) →
@@ -344,20 +355,16 @@ runWorker :: -- {{{
         IO (VisitorWorkerEnvironment result)
     ) →
     MPI ()
-runWorker constructVisitor forkWorkerThread =
+runWorker initializeGlobalState constructVisitor forkWorkerThread = do
     receiveBroadcastMessage
     >>=
     maybe (return ())
-    (
-        liftIO
-        .
+    (\configuration → liftIO $ do
+        initializeGlobalState configuration
         Process.runWorker
             (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
             (unwrapMPI . flip sendMessage 0)
-        .
-        flip forkWorkerThread
-        .
-        constructVisitor
+            (flip forkWorkerThread . constructVisitor $ configuration)
     )
 -- }}}
 

@@ -10,6 +10,7 @@ main =
     (runMPI $
         runVisitor
             (return ())
+            (const $ return ())
             (const $ return Nothing)
             (const $ return ())
             (const $ return [()])
