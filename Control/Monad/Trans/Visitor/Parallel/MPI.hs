@@ -67,12 +67,12 @@ import qualified System.Log.Logger as Logger
 
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
+import qualified Control.Monad.Trans.Visitor.Parallel.Process as Process
+import Control.Monad.Trans.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..),processServerMessage)
 import Control.Monad.Trans.Visitor.Supervisor
 import Control.Monad.Trans.Visitor.Supervisor.Driver
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
 import Control.Monad.Trans.Visitor.Worker
-import qualified Control.Monad.Trans.Visitor.Worker.Process as Process
-import Control.Monad.Trans.Visitor.Worker.Process (MessageForSupervisor(..),MessageForWorker(..),processServerMessage)
 import Control.Monad.Trans.Visitor.Workload
 -- }}}
 
