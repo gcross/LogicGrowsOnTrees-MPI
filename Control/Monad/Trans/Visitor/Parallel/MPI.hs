@@ -68,7 +68,7 @@ import qualified System.Log.Logger as Logger
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
 import qualified Control.Monad.Trans.Visitor.Parallel.Process as Process
-import Control.Monad.Trans.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..),processServerMessage)
+import Control.Monad.Trans.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
 import Control.Monad.Trans.Visitor.Supervisor
 import Control.Monad.Trans.Visitor.Supervisor.Driver
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
@@ -322,7 +322,19 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
             supervisor_actions
             (do mapM_ addWorker [1..number_of_workers]
                 forever $ do
-                    lift tryReceiveMessage >>= maybe (liftIO yield) (uncurry processServerMessage)
+                    lift tryReceiveMessage >>= maybe (liftIO yield) (\(worker_id,message) →
+                        case message of
+                            Failed description →
+                                receiveWorkerFailure worker_id description
+                            Finished final_progress →
+                                receiveWorkerFinished worker_id final_progress
+                            ProgressUpdate progress_update →
+                                receiveProgressUpdate worker_id progress_update
+                            StolenWorkload maybe_stolen_workload →
+                                receiveStolenWorkload worker_id maybe_stolen_workload
+                            WorkerQuit →
+                                error $ "Worker " ++ show worker_id ++ " has quit prematurely."
+                     )
                     processAllRequests request_queue
             )
         >>= \(VisitorSupervisorResult termination_reason _) → return $ case termination_reason of
