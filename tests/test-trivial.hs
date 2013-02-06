@@ -3,7 +3,7 @@
 -- }}}
 
 -- Imports {{{
-import Control.Monad.Trans.Visitor.Parallel.MPI
+import Control.Visitor.Parallel.MPI
 -- }}}
 
 main =

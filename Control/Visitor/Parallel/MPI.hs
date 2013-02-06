@@ -12,7 +12,7 @@
 {-# LANGUAGE UnicodeSyntax #-}
 -- }}}
 
-module Control.Monad.Trans.Visitor.Parallel.MPI
+module Control.Visitor.Parallel.MPI
     ( TerminationReason(..)
     , driver
     , driverMPI
@@ -65,15 +65,15 @@ import Options.Applicative (InfoMod,execParser,info)
 
 import qualified System.Log.Logger as Logger
 
-import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
-import Control.Monad.Trans.Visitor.Checkpoint
-import Control.Monad.Trans.Visitor.Main
-import qualified Control.Monad.Trans.Visitor.Parallel.Process as Process
-import Control.Monad.Trans.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
-import Control.Monad.Trans.Visitor.Supervisor
-import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
-import Control.Monad.Trans.Visitor.Worker
-import Control.Monad.Trans.Visitor.Workload
+import Control.Visitor (Visitor,VisitorIO,VisitorT)
+import Control.Visitor.Checkpoint
+import Control.Visitor.Main
+import qualified Control.Visitor.Parallel.Process as Process
+import Control.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
+import Control.Visitor.Supervisor
+import Control.Visitor.Supervisor.RequestQueue
+import Control.Visitor.Worker
+import Control.Visitor.Workload
 -- }}}
 
 -- Types {{{

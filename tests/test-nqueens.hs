@@ -11,9 +11,9 @@ import Data.Serialize (Serialize(..))
 
 import Options.Applicative
 
-import Control.Monad.Trans.Visitor.Main (TerminationReason(..),mainVisitor)
-import Control.Monad.Trans.Visitor.Examples.Queens (nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
-import Control.Monad.Trans.Visitor.Parallel.MPI (driver)
+import Control.Visitor.Main (TerminationReason(..),mainVisitor)
+import Control.Visitor.Examples.Queens (nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
+import Control.Visitor.Parallel.MPI (driver)
 -- }}}
 
 instance Serialize (Sum Int) where
