@@ -70,7 +70,7 @@ import Control.Visitor.Checkpoint
 import Control.Visitor.Main
 import qualified Control.Visitor.Parallel.Process as Process
 import Control.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
-import Control.Visitor.Supervisor
+import Control.Visitor.Supervisor hiding (runSupervisor)
 import Control.Visitor.Supervisor.RequestQueue
 import Control.Visitor.Worker
 import Control.Visitor.Workload
@@ -80,16 +80,16 @@ import Control.Visitor.Workload
 
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
 
-type SupervisorMonad result = VisitorSupervisorMonad result CInt MPI
+type MPIMonad result = SupervisorMonad result CInt MPI
 
-newtype SupervisorControllerMonad result α = C { unwrapC :: RequestQueueReader result CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO)
+newtype MPIControllerMonad result α = C { unwrapC :: RequestQueueReader result CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO)
 
 -- }}}
 
 -- Instances {{{
 
-instance Monoid result ⇒ RequestQueueMonad (SupervisorControllerMonad result) where -- {{{
-    type RequestQueueMonadResult (SupervisorControllerMonad result) = result
+instance Monoid result ⇒ RequestQueueMonad (MPIControllerMonad result) where -- {{{
+    type RequestQueueMonadResult (MPIControllerMonad result) = result
     abort = C abort
     fork = C . fork . unwrapC
     getCurrentProgressAsync = C . getCurrentProgressAsync
@@ -133,7 +133,7 @@ runVisitor :: -- {{{
     IO configuration →
     (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → MPIControllerMonad result ()) →
     (configuration → Visitor result) →
     MPI (Maybe (configuration,TerminationReason result))
 runVisitor = genericRunVisitor forkVisitorWorkerThread
@@ -144,7 +144,7 @@ runVisitorIO :: -- {{{
     IO configuration →
     (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorIO result) →
     MPI (Maybe (configuration,TerminationReason result))
 runVisitorIO = genericRunVisitor forkVisitorIOWorkerThread
@@ -156,7 +156,7 @@ runVisitorT :: -- {{{
     IO configuration →
     (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorT m result) →
     MPI (Maybe (configuration,TerminationReason result))
 runVisitorT = genericRunVisitor . forkVisitorTWorkerThread
@@ -251,7 +251,7 @@ genericRunVisitor :: -- {{{
     IO configuration →
     (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → MPIControllerMonad result ()) →
     (configuration → visitor) →
     MPI (Maybe (configuration,TerminationReason result))
 genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
@@ -269,7 +269,7 @@ runSupervisor :: -- {{{
     IO configuration →
     (configuration → IO ()) →
     (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → MPIControllerMonad result ()) →
     MPI (configuration,TerminationReason result)
 runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
     configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
@@ -278,7 +278,7 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
     maybe_starting_progress ← liftIO (getStartingProgress configuration)
     request_queue ← newRequestQueue
     _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
-    let supervisor_actions = VisitorSupervisorActions
+    let supervisor_actions = SupervisorActions
             {   broadcast_progress_update_to_workers_action =
                     mapM_ (sendMessage RequestProgressUpdate)
             ,   broadcast_workload_steal_to_workers_action =
@@ -288,7 +288,7 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
                     sendMessage . Workload
             }
     termination_reason ←
-        runVisitorSupervisorMaybeStartingFrom
+        runSupervisorMaybeStartingFrom
             maybe_starting_progress
             supervisor_actions
             (do mapM_ addWorker [1..number_of_workers]
@@ -308,7 +308,7 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
                      )
                     processAllRequests request_queue
             )
-        >>= \(VisitorSupervisorResult termination_reason _) → return $ case termination_reason of
+        >>= \(SupervisorResult termination_reason _) → return $ case termination_reason of
             SupervisorAborted progress → Aborted progress
             SupervisorCompleted result → Completed result
             SupervisorFailure worker_id message → Failure $
