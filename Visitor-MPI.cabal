@@ -41,16 +41,26 @@ Library
     Exposed-modules:
         Control.Monad.Trans.Visitor.Parallel.MPI
 
-Test-Suite test-trivial
-    Type:       exitcode-stdio-1.0
+Flag build-test-executables
+    Description: Enable building the n-queens executables.
+    Default:     False
+
+Executable test-trivial
     Main-is:    tests/test-trivial.hs
     Build-depends: base
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
+    if flag(build-test-executables)
+        Buildable: True
+    else
+        Buildable: False
 
-Test-Suite test-nqueens
-    Type:       exitcode-stdio-1.0
+Executable test-nqueens
     Main-is:    tests/test-nqueens.hs
     Build-depends: base
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
+    if flag(build-test-executables)
+        Buildable: True
+    else
+        Buildable: False
