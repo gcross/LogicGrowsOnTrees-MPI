@@ -72,7 +72,7 @@ import qualified Control.Visitor.Parallel.Process as Process
 import Control.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
 import Control.Visitor.Supervisor hiding (runSupervisor)
 import Control.Visitor.Supervisor.RequestQueue
-import Control.Visitor.Worker
+import Control.Visitor.Worker hiding (ProgressUpdate,StolenWorkload)
 import Control.Visitor.Workload
 -- }}}
 
@@ -132,7 +132,7 @@ runVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → Visitor result) →
     MPI (Maybe (configuration,TerminationReason result))
@@ -143,7 +143,7 @@ runVisitorIO :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorIO result) →
     MPI (Maybe (configuration,TerminationReason result))
@@ -155,7 +155,7 @@ runVisitorT :: -- {{{
     (∀ α. m α → IO α) →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorT m result) →
     MPI (Maybe (configuration,TerminationReason result))
@@ -243,14 +243,14 @@ tryReceiveMessage = liftIO $
 genericRunVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     (
-        (VisitorWorkerTerminationReason result → IO ()) →
+        (WorkerTerminationReason result → IO ()) →
         visitor →
-        VisitorWorkload →
-        IO (VisitorWorkerEnvironment result)
+        Workload →
+        IO (WorkerEnvironment result)
     ) →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → visitor) →
     MPI (Maybe (configuration,TerminationReason result))
@@ -268,7 +268,7 @@ runSupervisor :: -- {{{
     CInt →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     MPI (configuration,TerminationReason result)
 runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
@@ -278,19 +278,14 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
     maybe_starting_progress ← liftIO (getStartingProgress configuration)
     request_queue ← newRequestQueue
     _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
-    let supervisor_actions = SupervisorActions
-            {   broadcast_progress_update_to_workers_action =
-                    mapM_ (sendMessage RequestProgressUpdate)
-            ,   broadcast_workload_steal_to_workers_action =
-                    mapM_ (sendMessage RequestWorkloadSteal)
-            ,   receive_current_progress_action = receiveProgress request_queue
-            ,   send_workload_to_worker_action =
-                    sendMessage . Workload
-            }
+    let broadcastProgressUpdateToWorkers = mapM_ (sendMessage RequestProgressUpdate)
+        broadcastWorkloadStealToWorkers = mapM_ (sendMessage RequestWorkloadSteal)
+        receiveCurrentProgress = receiveProgress request_queue
+        sendWorkloadToWorker = sendMessage . StartWorkload
     termination_reason ←
         runSupervisorMaybeStartingFrom
             maybe_starting_progress
-            supervisor_actions
+            (SupervisorCallbacks{..})
             (do mapM_ addWorker [1..number_of_workers]
                 forever $ do
                     lift tryReceiveMessage >>= maybe (liftIO yield) (\(worker_id,message) →
@@ -332,10 +327,10 @@ runWorker :: -- {{{
     (configuration → IO ()) →
     (configuration → visitor) →
     (
-        (VisitorWorkerTerminationReason result → IO ()) →
+        (WorkerTerminationReason result → IO ()) →
         visitor →
-        VisitorWorkload →
-        IO (VisitorWorkerEnvironment result)
+        Workload →
+        IO (WorkerEnvironment result)
     ) →
     MPI ()
 runWorker initializeGlobalState constructVisitor forkWorkerThread = do
