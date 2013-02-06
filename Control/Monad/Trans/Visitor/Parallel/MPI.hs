@@ -42,7 +42,7 @@ import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.Composition ((.******),(.*******))
+import Data.Composition ((.*******))
 import Data.Derive.Serialize
 import Data.DeriveTH
 import Data.Function (fix)
@@ -67,10 +67,10 @@ import qualified System.Log.Logger as Logger
 
 import Control.Monad.Trans.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Monad.Trans.Visitor.Checkpoint
+import Control.Monad.Trans.Visitor.Main
 import qualified Control.Monad.Trans.Visitor.Parallel.Process as Process
 import Control.Monad.Trans.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
 import Control.Monad.Trans.Visitor.Supervisor
-import Control.Monad.Trans.Visitor.Supervisor.Driver
 import Control.Monad.Trans.Visitor.Supervisor.RequestQueue
 import Control.Monad.Trans.Visitor.Worker
 import Control.Monad.Trans.Visitor.Workload
@@ -101,31 +101,23 @@ instance Monoid result ⇒ RequestQueueMonad (SupervisorControllerMonad result) 
 
 -- Drivers {{{
 
-driver :: ∀ configuration result. (Monoid result, Serialize configuration) ⇒ Driver IO configuration result -- {{{
+driver :: ∀ configuration visitor result. (Monoid result, Serialize configuration) ⇒ Driver IO configuration visitor result -- {{{
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driver = 
-    case (driverMPI :: Driver MPI configuration result) of
-        Driver{..} → Driver
-            (runMPI .****** driverRunVisitor)
-            (runMPI .****** driverRunVisitorIO)
-            (runMPI .******* driverRunVisitorT)
+driver = case (driverMPI :: Driver MPI configuration visitor result) of { Driver runDriver → Driver (runMPI .******* runDriver) }
 -- }}}
 
-driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration result -- {{{
+driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration visitor result -- {{{
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driverMPI = Driver
-    (genericDriver runVisitor)
-    (genericDriver runVisitorIO)
-    (genericDriver . runVisitorT)
-  where
-    genericDriver run configuration_parser (infomod :: ∀ α. InfoMod α) initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager =
-        run (execParser (info configuration_parser infomod))
-            initializeGlobalState
-            getMaybeStartingProgress
-            constructManager
-            constructVisitor
-        >>=
-        maybe (return ()) (liftIO . uncurry notifyTerminated)
+driverMPI = Driver $ \forkVisitorWorkerThread configuration_parser infomod initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager →
+    genericRunVisitor
+        forkVisitorWorkerThread
+        (execParser (info configuration_parser infomod))
+        initializeGlobalState
+        getMaybeStartingProgress
+        constructManager
+        constructVisitor
+    >>=
+    maybe (return ()) (liftIO . uncurry notifyTerminated)
 -- }}}
 
 -- }}}
@@ -144,14 +136,7 @@ runVisitor :: -- {{{
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → Visitor result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitor getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
-    genericRunVisitor
-        getConfiguration
-        initializeGlobalState
-        getStartingProgress
-        constructManager
-        constructVisitor
-        forkVisitorWorkerThread
+runVisitor = genericRunVisitor forkVisitorWorkerThread
 -- }}}
 
 runVisitorIO :: -- {{{
@@ -162,14 +147,7 @@ runVisitorIO :: -- {{{
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorIO result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitorIO getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
-    genericRunVisitor
-        getConfiguration
-        initializeGlobalState
-        getStartingProgress
-        constructManager
-        constructVisitor
-        forkVisitorIOWorkerThread
+runVisitorIO = genericRunVisitor forkVisitorIOWorkerThread
 -- }}}
 
 runVisitorT :: -- {{{
@@ -181,14 +159,7 @@ runVisitorT :: -- {{{
     (configuration → SupervisorControllerMonad result ()) →
     (configuration → VisitorT m result) →
     MPI (Maybe (configuration,TerminationReason result))
-runVisitorT runInBase getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
-    genericRunVisitor
-        getConfiguration
-        initializeGlobalState
-        getStartingProgress
-        constructManager
-        constructVisitor
-        (forkVisitorTWorkerThread runInBase)
+runVisitorT = genericRunVisitor . forkVisitorTWorkerThread
 -- }}}
 
 -- }}}
@@ -271,19 +242,19 @@ tryReceiveMessage = liftIO $
 
 genericRunVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Maybe (VisitorProgress result))) →
-    (configuration → SupervisorControllerMonad result ()) →
-    (configuration → visitor) →
     (
         (VisitorWorkerTerminationReason result → IO ()) →
         visitor →
         VisitorWorkload →
         IO (VisitorWorkerEnvironment result)
     ) →
+    IO configuration →
+    (configuration → IO ()) →
+    (configuration → IO (Maybe (VisitorProgress result))) →
+    (configuration → SupervisorControllerMonad result ()) →
+    (configuration → visitor) →
     MPI (Maybe (configuration,TerminationReason result))
-genericRunVisitor getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor forkWorkerThread =
+genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
         if i_am_supervisor
