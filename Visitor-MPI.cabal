@@ -12,9 +12,14 @@ Build-type:          Simple
 Category:	     
 Extra-source-files:  c-sources/Visitor-MPI.c c-sources/Visitor-MPI.h
 
--- Source-repository head
---     Type: git
---     Location: 
+Source-Repository head
+  Type:                git
+  Location:            git://github.com/gcross/Visitor-MPI.git
+
+Source-Repository this
+    Type:                git
+    Location:            git://github.com/gcross/Visitor-MPI.git
+--    Tag:                 
 
 Library
     Build-depends:
