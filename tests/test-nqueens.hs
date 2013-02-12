@@ -6,13 +6,14 @@
 -- Imports {{{
 import Control.Monad ((>=>))
 
+import Data.Functor ((<$>))
 import Data.Monoid (Sum(..),mempty)
 import Data.Serialize (Serialize(..))
 
-import Options.Applicative
+import System.Console.CmdTheLine
 
-import Control.Visitor.Main (TerminationReason(..),mainVisitor)
-import Control.Visitor.Examples.Queens (nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
+import Control.Visitor.Main (TerminationReason(..),mainVisitor,runTerminationReason)
+import Control.Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
 import Control.Visitor.Parallel.MPI (driver)
 -- }}}
 
@@ -23,14 +24,14 @@ instance Serialize (Sum Int) where
 main =
     mainVisitor
         driver
-        (argument (auto >=> \n → if n >= 1 && n <= nqueens_maximum_size then return n else fail $ "bad board size (must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive)")
-            (   metavar "#"
-             <> help ("board size (must be between 1 and " ++ show nqueens_maximum_size ++ " inclusive)")
-            )
-        )
-        mempty
-        (\n termination_reason →
-            case termination_reason of
+        (getBoardSize <$> required (flip (pos 0) (posInfo
+            {   posName = "BOARD_SIZE"
+            ,   posDoc = "board size"
+            }
+        ) Nothing))
+        (defTI { termDoc = "count the number of n-queens solutions for a given board size" })
+        (\n run_outcome →
+            case runTerminationReason run_outcome of
                 Aborted progress → error $ "Visitor aborted with progress " ++ show progress ++ "."
                 Completed (Sum number_of_solutions)
                  | nqueensCorrectCount n == number_of_solutions →

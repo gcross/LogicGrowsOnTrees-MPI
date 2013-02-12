@@ -61,8 +61,6 @@ import Foreign.Marshal.Utils (toBool)
 import Foreign.Ptr (Ptr)
 import Foreign.Storable (peek)
 
-import Options.Applicative (InfoMod,execParser,info)
-
 import qualified System.Log.Logger as Logger
 
 import Control.Visitor (Visitor,VisitorIO,VisitorT)
@@ -108,10 +106,10 @@ driver = case (driverMPI :: Driver MPI configuration visitor result) of { Driver
 
 driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration visitor result -- {{{
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driverMPI = Driver $ \forkVisitorWorkerThread configuration_parser infomod initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager →
+driverMPI = Driver $ \forkVisitorWorkerThread configuration_term term_info initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager →
     genericRunVisitor
         forkVisitorWorkerThread
-        (execParser (info configuration_parser infomod))
+        (mainParser configuration_term term_info)
         initializeGlobalState
         getMaybeStartingProgress
         constructManager
@@ -135,7 +133,7 @@ runVisitor :: -- {{{
     (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → Visitor result) →
-    MPI (Maybe (configuration,TerminationReason result))
+    MPI (Maybe (configuration,RunOutcome result))
 runVisitor = genericRunVisitor forkVisitorWorkerThread
 -- }}}
 
@@ -146,7 +144,7 @@ runVisitorIO :: -- {{{
     (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorIO result) →
-    MPI (Maybe (configuration,TerminationReason result))
+    MPI (Maybe (configuration,RunOutcome result))
 runVisitorIO = genericRunVisitor forkVisitorIOWorkerThread
 -- }}}
 
@@ -158,7 +156,7 @@ runVisitorT :: -- {{{
     (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorT m result) →
-    MPI (Maybe (configuration,TerminationReason result))
+    MPI (Maybe (configuration,RunOutcome result))
 runVisitorT = genericRunVisitor . forkVisitorTWorkerThread
 -- }}}
 
@@ -253,7 +251,7 @@ genericRunVisitor :: -- {{{
     (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → visitor) →
-    MPI (Maybe (configuration,TerminationReason result))
+    MPI (Maybe (configuration,RunOutcome result))
 genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
@@ -270,7 +268,7 @@ runSupervisor :: -- {{{
     (configuration → IO ()) →
     (configuration → IO (Maybe (Progress result))) →
     (configuration → MPIControllerMonad result ()) →
-    MPI (configuration,TerminationReason result)
+    MPI (configuration,RunOutcome result)
 runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
     configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
     sendBroadcastMessage (Just configuration)
@@ -282,32 +280,39 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
         broadcastWorkloadStealToWorkers = mapM_ (sendMessage RequestWorkloadSteal)
         receiveCurrentProgress = receiveProgress request_queue
         sendWorkloadToWorker = sendMessage . StartWorkload
-    termination_reason ←
+        tryGetRequest :: MPI (Maybe (Either (MPIMonad result ()) (CInt,MessageForSupervisor result)))
+        tryGetRequest = do -- {{{
+            maybe_message ← tryReceiveMessage
+            case maybe_message of
+                Just message → return . Just . Right $ message
+                Nothing → do
+                    maybe_request ← tryDequeueRequest request_queue
+                    case maybe_request of
+                        Just request → return . Just . Left $ request
+                        Nothing → return Nothing
+        -- }}}
+    SupervisorOutcome{..} ←
         runSupervisorMaybeStartingFrom
             maybe_starting_progress
             (SupervisorCallbacks{..})
-            (do mapM_ addWorker [1..number_of_workers]
-                forever $ do
-                    lift tryReceiveMessage >>= maybe (liftIO yield) (\(worker_id,message) →
-                        case message of
-                            Failed description →
-                                receiveWorkerFailure worker_id description
-                            Finished final_progress →
-                                receiveWorkerFinished worker_id final_progress
-                            ProgressUpdate progress_update →
-                                receiveProgressUpdate worker_id progress_update
-                            StolenWorkload maybe_stolen_workload →
-                                receiveStolenWorkload worker_id maybe_stolen_workload
-                            WorkerQuit →
-                                error $ "Worker " ++ show worker_id ++ " has quit prematurely."
-                     )
-                    processAllRequests request_queue
+            (PollingProgram
+                (mapM_ addWorker [1..number_of_workers])
+                tryGetRequest
+                .
+                either id
+                $
+                \(worker_id,message) → case message of
+                    Failed description →
+                        receiveWorkerFailure worker_id description
+                    Finished final_progress →
+                        receiveWorkerFinished worker_id final_progress
+                    ProgressUpdate progress_update →
+                        receiveProgressUpdate worker_id progress_update
+                    StolenWorkload maybe_stolen_workload →
+                        receiveStolenWorkload worker_id maybe_stolen_workload
+                    WorkerQuit →
+                        error $ "Worker " ++ show worker_id ++ " has quit prematurely."
             )
-        >>= \(SupervisorResult termination_reason _) → return $ case termination_reason of
-            SupervisorAborted progress → Aborted progress
-            SupervisorCompleted result → Completed result
-            SupervisorFailure worker_id message → Failure $
-                "Process " ++ show worker_id ++ " failed with message: " ++ show message
     mapM_ (sendMessage QuitWorker) [1..number_of_workers]
     let confirmShutdown remaining_workers
           | Set.null remaining_workers = return ()
@@ -319,7 +324,12 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
                     _ → confirmShutdown remaining_workers
             )
     confirmShutdown $ Set.fromList [1..number_of_workers]
-    return (configuration,termination_reason)
+    let termination_reason = case supervisorTerminationReason of
+            SupervisorAborted progress → Aborted progress
+            SupervisorCompleted result → Completed result
+            SupervisorFailure worker_id message → Failure $
+                "Process " ++ show worker_id ++ " failed with message: " ++ show message
+    return (configuration,RunOutcome supervisorRunStatistics termination_reason)
 -- }}}
 
 runWorker :: -- {{{
