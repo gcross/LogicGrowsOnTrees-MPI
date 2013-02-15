@@ -41,7 +41,7 @@ Library
     Exposed-modules:
         Control.Visitor.Parallel.MPI
 
-Flag build-test-executables
+Flag tests
     Description: Enable building the n-queens executables.
     Default:     False
 
@@ -50,7 +50,7 @@ Executable test-trivial
     Build-depends: base
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
-    if flag(build-test-executables)
+    if flag(tests)
         Buildable: True
     else
         Buildable: False
@@ -60,7 +60,7 @@ Executable test-nqueens
     Build-depends: base
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
-    if flag(build-test-executables)
+    if flag(tests)
         Buildable: True
     else
         Buildable: False
