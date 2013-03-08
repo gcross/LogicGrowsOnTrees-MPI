@@ -15,11 +15,8 @@ import System.Console.CmdTheLine
 import Control.Visitor.Main (TerminationReason(..),mainVisitor,runTerminationReason)
 import Control.Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
 import Control.Visitor.Parallel.MPI (driver)
+import Control.Visitor.Utils.WordSum (WordSum(..))
 -- }}}
-
-instance Serialize (Sum Int) where
-    put = put . getSum
-    get = fmap Sum get
 
 main =
     mainVisitor
@@ -33,7 +30,7 @@ main =
         (\n run_outcome →
             case runTerminationReason run_outcome of
                 Aborted progress → error $ "Visitor aborted with progress " ++ show progress ++ "."
-                Completed (Sum number_of_solutions)
+                Completed (WordSum number_of_solutions)
                  | nqueensCorrectCount n == number_of_solutions →
                     putStrLn $ "Correctly found all " ++ show number_of_solutions ++ " solutions for board size " ++ show n ++ "."
                  | otherwise →
