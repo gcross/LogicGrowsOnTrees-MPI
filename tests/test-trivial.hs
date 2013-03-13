@@ -4,8 +4,8 @@
 
 -- Imports {{{
 import Control.Applicative ((<$>))
-import Control.Visitor.Main
-import Control.Visitor.Parallel.MPI
+import Control.Visitor.Parallel.Main
+import Control.Visitor.Parallel.BackEnd.MPI
 
 import Data.Monoid (mempty)
 -- }}}

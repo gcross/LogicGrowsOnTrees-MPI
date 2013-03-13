@@ -12,9 +12,9 @@ import Data.Serialize (Serialize(..))
 
 import System.Console.CmdTheLine
 
-import Control.Visitor.Main (TerminationReason(..),mainVisitor,runTerminationReason)
+import Control.Visitor.Parallel.Main (TerminationReason(..),mainVisitor,runTerminationReason)
 import Control.Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
-import Control.Visitor.Parallel.MPI (driver)
+import Control.Visitor.Parallel.BackEnd.MPI (driver)
 import Control.Visitor.Utils.WordSum (WordSum(..))
 -- }}}
 

@@ -12,7 +12,7 @@
 {-# LANGUAGE UnicodeSyntax #-}
 -- }}}
 
-module Control.Visitor.Parallel.MPI
+module Control.Visitor.Parallel.BackEnd.MPI
     ( TerminationReason(..)
     , driver
     , driverMPI
@@ -65,12 +65,12 @@ import qualified System.Log.Logger as Logger
 
 import Control.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Visitor.Checkpoint
-import Control.Visitor.Main
-import qualified Control.Visitor.Parallel.Process as Process
-import Control.Visitor.Parallel.Message (MessageForSupervisor(..),MessageForWorker(..))
-import Control.Visitor.Supervisor hiding (runSupervisor)
-import Control.Visitor.Supervisor.RequestQueue
-import Control.Visitor.Worker hiding (ProgressUpdate,StolenWorkload,runVisitor,runVisitorIO,runVisitorT)
+import Control.Visitor.Parallel.Main
+import qualified Control.Visitor.Parallel.Common.Process as Process
+import Control.Visitor.Parallel.Common.Message (MessageForSupervisor(..),MessageForWorker(..))
+import Control.Visitor.Parallel.Common.Supervisor hiding (runSupervisor)
+import Control.Visitor.Parallel.Common.Supervisor.RequestQueue
+import Control.Visitor.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runVisitor,runVisitorIO,runVisitorT)
 import Control.Visitor.Workload
 -- }}}
 

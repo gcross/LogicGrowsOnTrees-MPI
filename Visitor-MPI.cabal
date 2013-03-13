@@ -39,7 +39,7 @@ Library
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
     Exposed-modules:
-        Control.Visitor.Parallel.MPI
+        Control.Visitor.Parallel.BackEnd.MPI
 
 Flag tests
     Description: Enable building the n-queens executables.
