@@ -6,6 +6,8 @@
 import Control.Applicative ((<$>))
 import Control.Visitor.Main
 import Control.Visitor.Parallel.MPI
+
+import Data.Monoid (mempty)
 -- }}}
 
 main =
@@ -13,7 +15,7 @@ main =
         runVisitor
             (return ())
             (const $ return ())
-            (const $ return Nothing)
+            (const $ return mempty)
             (const $ return ())
             (const $ return [()])
     ) >>= \x → case runTerminationReason . snd <$> x of

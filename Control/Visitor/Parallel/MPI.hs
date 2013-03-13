@@ -106,12 +106,12 @@ driver = case (driverMPI :: Driver MPI configuration visitor result) of { Driver
 
 driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration visitor result -- {{{
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driverMPI = Driver $ \forkVisitorWorkerThread configuration_term term_info initializeGlobalState getMaybeStartingProgress notifyTerminated constructVisitor constructManager →
+driverMPI = Driver $ \forkVisitorWorkerThread configuration_term term_info initializeGlobalState getStartingProgress notifyTerminated constructVisitor constructManager →
     genericRunVisitor
         forkVisitorWorkerThread
         (mainParser configuration_term term_info)
         initializeGlobalState
-        getMaybeStartingProgress
+        getStartingProgress
         constructManager
         constructVisitor
     >>=
@@ -130,7 +130,7 @@ runVisitor :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (Progress result))) →
+    (configuration → IO (Progress result)) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → Visitor result) →
     MPI (Maybe (configuration,RunOutcome result))
@@ -141,7 +141,7 @@ runVisitorIO :: -- {{{
     (Serialize configuration, Monoid result, Serialize result) ⇒
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (Progress result))) →
+    (configuration → IO (Progress result)) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorIO result) →
     MPI (Maybe (configuration,RunOutcome result))
@@ -153,7 +153,7 @@ runVisitorT :: -- {{{
     (∀ α. m α → IO α) →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (Progress result))) →
+    (configuration → IO (Progress result)) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → VisitorT m result) →
     MPI (Maybe (configuration,RunOutcome result))
@@ -248,7 +248,7 @@ genericRunVisitor :: -- {{{
     ) →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (Progress result))) →
+    (configuration → IO (Progress result)) →
     (configuration → MPIControllerMonad result ()) →
     (configuration → visitor) →
     MPI (Maybe (configuration,RunOutcome result))
@@ -266,14 +266,14 @@ runSupervisor :: -- {{{
     CInt →
     IO configuration →
     (configuration → IO ()) →
-    (configuration → IO (Maybe (Progress result))) →
+    (configuration → IO (Progress result)) →
     (configuration → MPIControllerMonad result ()) →
     MPI (configuration,RunOutcome result)
 runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
     configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
     sendBroadcastMessage (Just configuration)
     liftIO $ initializeGlobalState configuration
-    maybe_starting_progress ← liftIO (getStartingProgress configuration)
+    starting_progress ← liftIO (getStartingProgress configuration)
     request_queue ← newRequestQueue
     _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
     let broadcastProgressUpdateToWorkers = mapM_ (sendMessage RequestProgressUpdate)
@@ -292,8 +292,8 @@ runSupervisor number_of_workers getConfiguration initializeGlobalState getStarti
                         Nothing → return Nothing
         -- }}}
     SupervisorOutcome{..} ←
-        runSupervisorMaybeStartingFrom
-            maybe_starting_progress
+        runSupervisorStartingFrom
+            starting_progress
             (SupervisorCallbacks{..})
             (PollingProgram
                 (mapM_ addWorker [1..number_of_workers])
