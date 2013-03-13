@@ -67,7 +67,7 @@ import Control.Visitor (Visitor,VisitorIO,VisitorT)
 import Control.Visitor.Checkpoint
 import Control.Visitor.Main
 import qualified Control.Visitor.Parallel.Process as Process
-import Control.Visitor.Parallel.Process (MessageForSupervisor(..),MessageForWorker(..))
+import Control.Visitor.Parallel.Message (MessageForSupervisor(..),MessageForWorker(..))
 import Control.Visitor.Supervisor hiding (runSupervisor)
 import Control.Visitor.Supervisor.RequestQueue
 import Control.Visitor.Worker hiding (ProgressUpdate,StolenWorkload,runVisitor,runVisitorIO,runVisitorT)
