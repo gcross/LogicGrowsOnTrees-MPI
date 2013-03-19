@@ -13,11 +13,11 @@ import Data.Monoid (mempty)
 main =
     (runMPI $
         runVisitor
-            (return ())
-            (const $ return ())
-            (const $ return mempty)
+            (return ((),()))
             (const $ return ())
             (const $ return [()])
+            (const . const $ return mempty)
+            (const . const $ return ())
     ) >>= \x → case runTerminationReason . snd <$> x of
         Nothing → return ()
         Just (Aborted progress) → error $ "Visitor aborted with progress " ++ show progress ++ "."

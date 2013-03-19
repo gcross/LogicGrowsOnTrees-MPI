@@ -25,7 +25,7 @@ module Control.Visitor.Parallel.BackEnd.MPI
 -- Imports {{{
 import Prelude hiding (catch)
 
-import Control.Applicative (Applicative())
+import Control.Applicative ((<$>),(<*>),Applicative(),liftA2)
 import Control.Arrow ((&&&),second)
 import Control.Concurrent (forkIO,killThread,threadDelay,yield)
 import Control.Concurrent.MVar
@@ -42,7 +42,7 @@ import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.Composition ((.*******))
+import Data.Composition ((.********))
 import Data.Derive.Serialize
 import Data.DeriveTH
 import Data.Function (fix)
@@ -99,23 +99,39 @@ instance Monoid result ⇒ RequestQueueMonad (MPIControllerMonad result) where -
 
 -- Drivers {{{
 
-driver :: ∀ configuration visitor result. (Monoid result, Serialize configuration) ⇒ Driver IO configuration visitor result -- {{{
+driver :: -- {{{
+    ∀ shared_configuration supervisor_configuration visitor result.
+    ( Monoid result
+    , Serialize shared_configuration
+    ) ⇒ Driver IO shared_configuration supervisor_configuration visitor result
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driver = case (driverMPI :: Driver MPI configuration visitor result) of { Driver runDriver → Driver (runMPI .******* runDriver) }
+driver = case (driverMPI :: Driver MPI shared_configuration supervisor_configuration visitor result) of { Driver runDriver → Driver (runMPI .******** runDriver) }
 -- }}}
 
-driverMPI :: (Monoid result, Serialize configuration) ⇒ Driver MPI configuration visitor result -- {{{
+driverMPI :: -- {{{
+    ( Monoid result
+    , Serialize shared_configuration
+    ) ⇒ Driver MPI shared_configuration supervisor_configuration visitor result
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
-driverMPI = Driver $ \forkVisitorWorkerThread configuration_term term_info initializeGlobalState getStartingProgress notifyTerminated constructVisitor constructManager →
+driverMPI = Driver $
+    \forkVisitorWorkerThread
+     shared_configuration_term
+     supervisor_configuration_term
+     term_info
+     initializeGlobalState
+     constructVisitor
+     getStartingProgress
+     notifyTerminated
+     constructManager →
     genericRunVisitor
         forkVisitorWorkerThread
-        (mainParser configuration_term term_info)
+        (mainParser (liftA2 (,) shared_configuration_term supervisor_configuration_term) term_info)
         initializeGlobalState
+        constructVisitor
         getStartingProgress
         constructManager
-        constructVisitor
     >>=
-    maybe (return ()) (liftIO . uncurry notifyTerminated)
+    maybe (return ()) (liftIO . (notifyTerminated <$> fst . fst <*> snd . fst <*> snd))
 -- }}}
 
 -- }}}
@@ -127,36 +143,36 @@ runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 -- }}}
 
 runVisitor :: -- {{{
-    (Serialize configuration, Monoid result, Serialize result) ⇒
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Progress result)) →
-    (configuration → MPIControllerMonad result ()) →
-    (configuration → Visitor result) →
-    MPI (Maybe (configuration,RunOutcome result))
+    (Serialize shared_configuration, Monoid result, Serialize result) ⇒
+    IO (shared_configuration,supervisor_configuration) →
+    (shared_configuration → IO ()) →
+    (shared_configuration → Visitor result) →
+    (shared_configuration → supervisor_configuration → IO (Progress result)) →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad result ()) →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcome result))
 runVisitor = genericRunVisitor forkVisitorWorkerThread
 -- }}}
 
 runVisitorIO :: -- {{{
-    (Serialize configuration, Monoid result, Serialize result) ⇒
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Progress result)) →
-    (configuration → MPIControllerMonad result ()) →
-    (configuration → VisitorIO result) →
-    MPI (Maybe (configuration,RunOutcome result))
+    (Serialize shared_configuration, Monoid result, Serialize result) ⇒
+    IO (shared_configuration,supervisor_configuration) →
+    (shared_configuration → IO ()) →
+    (shared_configuration → VisitorIO result) →
+    (shared_configuration → supervisor_configuration → IO (Progress result)) →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad result ()) →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcome result))
 runVisitorIO = genericRunVisitor forkVisitorIOWorkerThread
 -- }}}
 
 runVisitorT :: -- {{{
-    (Serialize configuration, Monoid result, Serialize result, Functor m, MonadIO m) ⇒
+    (Serialize shared_configuration, Monoid result, Serialize result, Functor m, MonadIO m) ⇒
     (∀ α. m α → IO α) →
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Progress result)) →
-    (configuration → MPIControllerMonad result ()) →
-    (configuration → VisitorT m result) →
-    MPI (Maybe (configuration,RunOutcome result))
+    IO (shared_configuration,supervisor_configuration) →
+    (shared_configuration → IO ()) →
+    (shared_configuration → VisitorT m result) →
+    (shared_configuration → supervisor_configuration → IO (Progress result)) →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad result ()) →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcome result))
 runVisitorT = genericRunVisitor . forkVisitorTWorkerThread
 -- }}}
 
@@ -239,20 +255,20 @@ tryReceiveMessage = liftIO $
 -- Internal Functions {{{
 
 genericRunVisitor :: -- {{{
-    (Serialize configuration, Monoid result, Serialize result) ⇒
+    (Serialize shared_configuration, Monoid result, Serialize result) ⇒
     (
         (WorkerTerminationReason result → IO ()) →
         visitor →
         Workload →
         IO (WorkerEnvironment result)
     ) →
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Progress result)) →
-    (configuration → MPIControllerMonad result ()) →
-    (configuration → visitor) →
-    MPI (Maybe (configuration,RunOutcome result))
-genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState getStartingProgress constructManager constructVisitor =
+    IO (shared_configuration,supervisor_configuration) →
+    (shared_configuration → IO ()) →
+    (shared_configuration → visitor) →
+    (shared_configuration → supervisor_configuration → IO (Progress result)) →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad result ()) →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcome result))
+genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState constructVisitor getStartingProgress constructManager =
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
         if i_am_supervisor
@@ -261,21 +277,22 @@ genericRunVisitor forkWorkerThread getConfiguration initializeGlobalState getSta
 -- }}}
 
 runSupervisor :: -- {{{
-    ∀ configuration result.
-    (Serialize configuration, Monoid result, Serialize result) ⇒
+    ∀ shared_configuration supervisor_configuration result.
+    (Serialize shared_configuration, Monoid result, Serialize result) ⇒
     CInt →
-    IO configuration →
-    (configuration → IO ()) →
-    (configuration → IO (Progress result)) →
-    (configuration → MPIControllerMonad result ()) →
-    MPI (configuration,RunOutcome result)
+    IO (shared_configuration,supervisor_configuration) →
+    (shared_configuration → IO ()) →
+    (shared_configuration → supervisor_configuration → IO (Progress result)) →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad result ()) →
+    MPI ((shared_configuration,supervisor_configuration),RunOutcome result)
 runSupervisor number_of_workers getConfiguration initializeGlobalState getStartingProgress constructManager = do
-    configuration :: configuration ← liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing  :: Maybe configuration)))
-    sendBroadcastMessage (Just configuration)
-    liftIO $ initializeGlobalState configuration
-    starting_progress ← liftIO (getStartingProgress configuration)
+    configuration@(shared_configuration,supervisor_configuration) :: (shared_configuration,supervisor_configuration) ←
+        liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing :: Maybe shared_configuration)))
+    sendBroadcastMessage (Just shared_configuration)
+    liftIO $ initializeGlobalState shared_configuration
+    starting_progress ← liftIO (getStartingProgress shared_configuration supervisor_configuration)
     request_queue ← newRequestQueue
-    _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager configuration) request_queue
+    _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager shared_configuration supervisor_configuration) request_queue
     let broadcastProgressUpdateToWorkers = mapM_ (sendMessage RequestProgressUpdate)
         broadcastWorkloadStealToWorkers = mapM_ (sendMessage RequestWorkloadSteal)
         receiveCurrentProgress = receiveProgress request_queue
