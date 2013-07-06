@@ -5,8 +5,11 @@ License-file:        LICENSE
 Author:              Gregory Crosswhite
 Maintainer:          Gregory Crosswhite <gcrosswhite@gmail.com>
 Stability:           Provisional
-Synopsis:            
-Description:         .
+Synopsis:            a back-end for the Visitor package that uses MPI
+Description:         This package provides a back-end for the Visitor package
+                     that uses MPI for parallelism.  See the module
+                     documentation for more details.
+                     .
                      NOTE:  You need to have an MPI implementation installed to
                             use the package; no thread support is required, and
                             it only uses very simple functionality so MPI 1.0 or
