@@ -1,18 +1,22 @@
--- Language extensions {{{
 {-# LANGUAGE UnicodeSyntax #-}
--- }}}
 
--- Imports {{{
 import Control.Applicative ((<$>))
-import Control.Visitor.Parallel.Main
-import Control.Visitor.Parallel.BackEnd.MPI
 
 import Data.Monoid (mempty)
--- }}}
+
+import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
+
+import Visitor.Parallel.BackEnd.MPI
+import Visitor.Parallel.Common.VisitorMode
+import Visitor.Parallel.Common.Worker (Purity(Pure))
+import Visitor.Parallel.Main
 
 main =
+    -- updateGlobalLogger rootLoggerName (setLevel DEBUG) >>
     (runMPI $
         runVisitor
+            (const AllMode)
+            Pure
             (return ((),()))
             (const $ return ())
             (const $ return [()])

@@ -6,8 +6,19 @@ Author:              Gregory Crosswhite
 Maintainer:          Gregory Crosswhite <gcrosswhite@gmail.com>
 Stability:           Provisional
 Synopsis:            
-Description:         
-Cabal-version:       >=1.6
+Description:         .
+                     NOTE:  You need to have an MPI implementation installed to
+                            use the package; no thread support is required, and
+                            it only uses very simple functionality so MPI 1.0 or
+                            1.1 should suffice. Also, @mpi.h@ needs to be in the
+                            include path and a library named @mpi@ (@libmpi@ in
+                            unix) in the library path; if these files are not in
+                            their respective paths, you can add their
+                            directories to their respective search paths for
+                            this package by using Cabal's respective
+                            @--extra-include-dirs=...@ and
+                            @--extra-lib-dirs=...@ options.
+Cabal-version:       >=1.8
 Build-type:          Simple
 Category:	     
 Extra-source-files:  c-sources/Visitor-MPI.c c-sources/Visitor-MPI.h
@@ -27,27 +38,33 @@ Library
         bytestring >= 0.9 && < 0.11,
         cereal == 0.3.*,
         cmdtheline == 0.2.*,
-        composition == 1.*,
         containers >= 0.4 && < 0.6,
         data-ivar >= 0.30 && < 1.0,
         derive >= 2.5.9 && < 2.6,
         hslogger == 1.2.*,
+        hslogger-template == 2.0.*,
         MonadCatchIO-transformers == 0.3.*,
         stm == 2.4.*,
         transformers >= 0.2 && < 0.4,
         Visitor == 1.0.*
+    Hs-source-dirs: sources
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
     Exposed-modules:
-        Control.Visitor.Parallel.BackEnd.MPI
+        Visitor.Parallel.BackEnd.MPI
 
 Flag tests
     Description: Enable building the n-queens executables.
     Default:     False
 
 Executable test-trivial
-    Main-is:    tests/test-trivial.hs
-    Build-depends: base
+    Main-is:    test-trivial.hs
+    Hs-source-dirs: tests
+    Build-depends:
+        base > 4 && < 5,
+        hslogger == 1.2.*,
+        Visitor == 1.0.*,
+        Visitor-MPI
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
     if flag(tests)
@@ -56,8 +73,15 @@ Executable test-trivial
         Buildable: False
 
 Executable test-nqueens
-    Main-is:    tests/test-nqueens.hs
-    Build-depends: base
+    Main-is:    test-nqueens.hs
+    Hs-source-dirs: tests
+    Build-depends:
+        base > 4 && < 5,
+        cereal == 0.3.*,
+        cmdtheline == 0.2.*,
+        hslogger == 1.2.*,
+        Visitor == 1.0.*,
+        Visitor-MPI
     Extra-libraries: mpi
     C-sources: c-sources/Visitor-MPI.c
     if flag(tests)

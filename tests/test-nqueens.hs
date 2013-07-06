@@ -1,9 +1,6 @@
--- Language extensions {{{
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UnicodeSyntax #-}
--- }}}
 
--- Imports {{{
 import Control.Monad ((>=>))
 
 import Data.Functor ((<$>))
@@ -11,15 +8,16 @@ import Data.Monoid (Sum(..),mempty)
 import Data.Serialize (Serialize(..))
 
 import System.Console.CmdTheLine
+import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
-import Control.Visitor.Parallel.Main (TerminationReason(..),mainVisitor,runTerminationReason)
-import Control.Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
-import Control.Visitor.Parallel.BackEnd.MPI (driver)
-import Control.Visitor.Utils.WordSum (WordSum(..))
--- }}}
+import Visitor.Parallel.Main (TerminationReason(..),mainForVisitTree,runTerminationReason)
+import Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
+import Visitor.Parallel.BackEnd.MPI (driver)
+import Visitor.Utils.WordSum (WordSum(..))
 
-main =
-    mainVisitor
+main =  do
+    -- updateGlobalLogger rootLoggerName (setLevel DEBUG)
+    mainForVisitTree
         driver
         (getBoardSize <$> required (flip (pos 0) (posInfo
             {   posName = "BOARD_SIZE"
