@@ -54,7 +54,10 @@ module Visitor.Parallel.BackEnd.MPI
     , getNumberOfWorkersAsync
     , requestProgressUpdate
     , requestProgressUpdateAsync
-    -- * Runner
+    -- * Generic runners
+    -- $runners
+    , runSupervisor
+    , runWorker
     , runVisitor
     ) where
 
@@ -260,104 +263,45 @@ instance HasVisitorMode (MPIControllerMonad visitor_mode) where
     type VisitorModeFor (MPIControllerMonad visitor_mode) = visitor_mode
 
 --------------------------------------------------------------------------------
------------------------------------- Runner ------------------------------------
+------------------------------- Generic runners --------------------------------
 --------------------------------------------------------------------------------
 
-{-| Visits the given tree using MPI to achieve parallelism.
+{- $runners
+In this section the full functionality of this module is exposed in case one
+does not want the restrictions of the driver interface.  If you decide to go in
+this direction, then you need to decide whether you want to manually handle
+factors such as deciding whether a process is the supervisor or a worker and the
+propagation of configuration information to the worker or whether you want this
+to be done automatically;  if you want full control then call 'runSupervisor'
+in the supervisor process --- which *must* be process 0! --- and call
+'runWorker' in the worker processes, otherwise call 'runVisitor'.
 
-    This function grants access to all of the functionality of this back-end,
-    rather than having to go through the more restricted driver interface. The
-    signature of this function is very complicated because it is meant to be
-    used in all processes, supervisor and worker alike.
-
-    WARNING: Do *NOT* use the threaded runtime with this back-end; see the
-             warning in the documentation for this module for more details.
+WARNING: Do *NOT* use the threaded runtime with this back-end; see the
+         warning in the documentation for this module for more details.
  -}
-runVisitor ::
-    ( Serialize shared_configuration
-    , Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
-    ) ⇒
-    (shared_configuration → VisitorMode visitor_mode) {-^ construct the visitor mode given the shared configuration -} →
-    Purity m n {-^ the purity of the tree generator -} →
-    IO (shared_configuration,supervisor_configuration) {-^ get the shared and supervisor-specific configuration information (run only on the supervisor) -} →
-    (shared_configuration → IO ()) {-^ initialize the global state of the process given the shared configuration (run on both supervisor and worker processes) -} →
-    (shared_configuration → TreeGeneratorT m (ResultFor visitor_mode)) {-^ construct the tree generator from the shared configuration (run only on the worker) -} →
-    (shared_configuration → supervisor_configuration → IO (ProgressFor visitor_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
-    (shared_configuration → supervisor_configuration → MPIControllerMonad visitor_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
-    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor visitor_mode))
-        {-^ if this process is the supervisor, then returns the outcome of the
-            run as well as the configuration information wrapped in 'Just';
-            otherwise, if this process is a worker, it returns 'Nothing'
-         -}
-runVisitor
-    constructVisitorMode
-    purity
-    getConfiguration
-    initializeGlobalState
-    constructTreeGenerator
-    getStartingProgress
-    constructManager
-  = debugM "Fetching number of processes and whether this is the supervisor process..." >>
-    getMPIInformation >>=
-    \(i_am_supervisor,number_of_workers) →
-        if i_am_supervisor
-            then debugM "I am the supervisor process." >>
-                 Just <$>
-                 runSupervisor
-                    number_of_workers
-                    constructVisitorMode
-                    getConfiguration
-                    initializeGlobalState
-                    getStartingProgress
-                    constructManager
-            else debugM "I am the worker process." >>
-                 runWorker
-                    constructVisitorMode
-                    purity
-                    constructTreeGenerator
-                    initializeGlobalState
-                 >> return Nothing
-
---------------------------------------------------------------------------------
------------------------------------ Internal -----------------------------------
---------------------------------------------------------------------------------
 
 type MPIMonad visitor_mode = SupervisorMonad visitor_mode CInt MPI
 
+{-| This runs the supervisor;  it must be called in process 0. -}
 runSupervisor ::
-    ∀ shared_configuration supervisor_configuration visitor_mode.
-    ( Serialize shared_configuration
-    , Serialize (ProgressFor visitor_mode)
+    ∀ visitor_mode.
+    ( Serialize (ProgressFor visitor_mode)
     , Serialize (WorkerFinalProgressFor visitor_mode)
     ) ⇒
-    CInt →
-    (shared_configuration → VisitorMode visitor_mode) →
-    IO (shared_configuration,supervisor_configuration) →
-    (shared_configuration → IO ()) →
-    (shared_configuration → supervisor_configuration → IO (ProgressFor visitor_mode)) →
-    (shared_configuration → supervisor_configuration → MPIControllerMonad visitor_mode ()) →
-    MPI ((shared_configuration,supervisor_configuration),RunOutcomeFor visitor_mode)
+    CInt {-^ the number of workers -} →
+    VisitorMode visitor_mode {-^ the visitor mode -} →
+    ProgressFor visitor_mode {-^ the initial progress of the run -} →
+    MPIControllerMonad visitor_mode () {-^ the controller of the supervisor -} →
+    MPI (RunOutcomeFor visitor_mode) {-^ the outcome of the run -}
 runSupervisor
     number_of_workers
-    constructVisitorMode
-    getConfiguration
-    initializeGlobalState
-    getStartingProgress
-    constructManager
+    visitor_mode
+    starting_progress
+    (C controller)
  = do
-    debugM "Getting configuration..."
-    configuration@(shared_configuration,supervisor_configuration) :: (shared_configuration,supervisor_configuration) ←
-        liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing :: Maybe shared_configuration)))
-    debugM "Broacasting shared configuration..."
-    sendBroadcastMessage (Just shared_configuration)
-    debugM "Initializing global state..."
-    liftIO $ initializeGlobalState shared_configuration
-    debugM "Reading starting progress..."
-    starting_progress ← liftIO (getStartingProgress shared_configuration supervisor_configuration)
     debugM "Creating request queue and forking controller thread..."
     request_queue ← newRequestQueue
-    _ ← liftIO . forkIO $ runReaderT (unwrapC $ constructManager shared_configuration supervisor_configuration) request_queue
+    _ ← liftIO . forkIO $ runReaderT controller request_queue
     let broadcastProgressUpdateToWorkers = mapM_ (sendMessage RequestProgressUpdate)
 
         broadcastWorkloadStealToWorkers = mapM_ (sendMessage RequestWorkloadSteal)
@@ -377,9 +321,9 @@ runSupervisor
                         Just request → return . Just . Left $ request
                         Nothing → return Nothing
     debugM "Entering supervisor loop..."
-    SupervisorOutcome{..} ←
+    supervisor_outcome ←
         runSupervisorStartingFrom
-            (constructVisitorMode shared_configuration)
+            visitor_mode
             starting_progress
             (SupervisorCallbacks{..})
             (PollingProgram
@@ -412,43 +356,98 @@ runSupervisor
                     _ → confirmShutdown remaining_workers
             )
     confirmShutdown $ Set.fromList [1..number_of_workers]
-    let termination_reason = case supervisorTerminationReason of
-            SupervisorAborted progress → Aborted progress
-            SupervisorCompleted result → Completed result
-            SupervisorFailure worker_id message → Failure $
-                "Process " ++ show worker_id ++ " failed with message: " ++ show message
-    return (configuration,RunOutcome supervisorRunStatistics termination_reason)
+    return $ extractRunOutcomeFromSupervisorOutcome supervisor_outcome
 
+{-| Runs a worker; it must be called in all processes other than process 0. -}
 runWorker ::
-    ( Serialize configuration
+    ( Serialize (ProgressFor visitor_mode)
+    , Serialize (WorkerFinalProgressFor visitor_mode)
+    ) ⇒
+    VisitorMode visitor_mode {-^ the mode in to visit the tree -} →
+    Purity m n {-^ the purity of the tree generator -} →
+    TreeGeneratorT m (ResultFor visitor_mode) {-^ the tree generator -} →
+    MPI ()
+runWorker
+    visitor_mode
+    purity
+    tree_generator
+ = liftIO $ do
+    debugM "Entering worker loop..."
+    Process.runWorker
+        visitor_mode
+        purity
+        tree_generator
+        (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
+        (unwrapMPI . flip sendMessage 0)
+    debugM "Exited worker loop."
+
+{-| Visits the given tree using MPI to achieve parallelism.
+
+    This function grants access to all of the functionality of this back-end,
+    rather than having to go through the more restricted driver interface. The
+    signature of this function is very complicated because it is meant to be
+    used in all processes, supervisor and worker alike.
+ -}
+runVisitor ::
+    ∀ shared_configuration supervisor_configuration visitor_mode m n.
+    ( Serialize shared_configuration
     , Serialize (ProgressFor visitor_mode)
     , Serialize (WorkerFinalProgressFor visitor_mode)
     ) ⇒
-    (configuration → VisitorMode visitor_mode) →
-    Purity m n →
-    (configuration → TreeGeneratorT m (ResultFor visitor_mode)) →
-    (configuration → IO ()) →
-    MPI ()
-runWorker
+    (shared_configuration → VisitorMode visitor_mode) {-^ construct the visitor mode given the shared configuration -} →
+    Purity m n {-^ the purity of the tree generator -} →
+    IO (shared_configuration,supervisor_configuration) {-^ get the shared and supervisor-specific configuration information (run only on the supervisor) -} →
+    (shared_configuration → IO ()) {-^ initialize the global state of the process given the shared configuration (run on both supervisor and worker processes) -} →
+    (shared_configuration → TreeGeneratorT m (ResultFor visitor_mode)) {-^ construct the tree generator from the shared configuration (run only on the worker) -} →
+    (shared_configuration → supervisor_configuration → IO (ProgressFor visitor_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad visitor_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor visitor_mode))
+        {-^ if this process is the supervisor, then returns the outcome of the
+            run as well as the configuration information wrapped in 'Just';
+            otherwise, if this process is a worker, it returns 'Nothing'
+         -}
+runVisitor
     constructVisitorMode
     purity
-    constructTreeGenerator
+    getConfiguration
     initializeGlobalState
- = do
-    debugM "Getting shared configuration from broadcast..."
-    >>
-    receiveBroadcastMessage
-    >>=
-    maybe (return ())
-    (\configuration → liftIO $ do
-        debugM "Initializing global state..."
-        initializeGlobalState configuration
-        debugM "Entering worker loop..."
-        Process.runWorker
-            (constructVisitorMode configuration)
-            purity
-            (constructTreeGenerator configuration)
-            (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
-            (unwrapMPI . flip sendMessage 0)
-        debugM "Exited worker loop."
-    )
+    constructTreeGenerator
+    getStartingProgress
+    constructManager
+  = debugM "Fetching number of processes and whether this is the supervisor process..." >>
+    getMPIInformation >>=
+    \(i_am_supervisor,number_of_workers) →
+        if i_am_supervisor
+            then do
+                debugM "I am the supervisor process."
+                debugM "Getting configuration..."
+                configuration@(shared_configuration,supervisor_configuration) ←
+                    liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing :: Maybe shared_configuration)))
+                debugM "Broacasting shared configuration..."
+                sendBroadcastMessage (Just shared_configuration)
+                debugM "Initializing global state..."
+                liftIO $ initializeGlobalState shared_configuration
+                debugM "Reading starting progress..."
+                starting_progress ← liftIO (getStartingProgress shared_configuration supervisor_configuration)
+                debugM "Running supervisor..."
+                Just . (configuration,) <$>
+                    runSupervisor
+                        number_of_workers
+                        (constructVisitorMode shared_configuration)
+                        starting_progress
+                        (constructManager shared_configuration supervisor_configuration)
+            else do
+                debugM "I am the worker process."
+                debugM "Getting shared configuration from broadcast..."
+                maybe_shared_configuration ← receiveBroadcastMessage
+                case maybe_shared_configuration of
+                    Nothing → return Nothing
+                    Just shared_configuration → do
+                        debugM "Initializing global state..."
+                        liftIO $ initializeGlobalState shared_configuration
+                        debugM "Running worker..."
+                        runWorker
+                            (constructVisitorMode shared_configuration)
+                            purity
+                            (constructTreeGenerator shared_configuration)
+                        return Nothing
