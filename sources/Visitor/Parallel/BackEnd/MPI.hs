@@ -107,10 +107,10 @@ import Visitor (TreeGeneratorT)
 import Visitor.Checkpoint
 import Visitor.Parallel.Main
 import qualified Visitor.Parallel.Common.Process as Process
+import Visitor.Parallel.Common.ExplorationMode
 import Visitor.Parallel.Common.Message
 import Visitor.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
 import Visitor.Parallel.Common.Supervisor.RequestQueue
-import Visitor.Parallel.Common.VisitorMode
 import Visitor.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runVisitor,runVisitorIO,runVisitorT)
 import Visitor.Workload
 
@@ -132,14 +132,14 @@ deriveLoggers "Logger" [DEBUG]
              details.
  -}
 driver ::
-    ∀ shared_configuration supervisor_configuration m n visitor_mode.
+    ∀ shared_configuration supervisor_configuration m n exploration_mode.
     ( Serialize shared_configuration
-    , Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
-    ) ⇒ Driver IO shared_configuration supervisor_configuration m n visitor_mode
+    , Serialize (ProgressFor exploration_mode)
+    , Serialize (WorkerFinalProgressFor exploration_mode)
+    ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driver =
-    case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n visitor_mode) of
+    case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n exploration_mode) of
         Driver runDriver → Driver (runMPI . runDriver)
 {-| This is the same as 'driver', but runs in the 'MPI' monad.  Use this driver
     if you want to do other things within 'MPI' (such as starting another
@@ -147,13 +147,13 @@ driver =
  -}
 driverMPI ::
     ( Serialize shared_configuration
-    , Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
-    ) ⇒ Driver MPI shared_configuration supervisor_configuration m n visitor_mode
+    , Serialize (ProgressFor exploration_mode)
+    , Serialize (WorkerFinalProgressFor exploration_mode)
+    ) ⇒ Driver MPI shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driverMPI = Driver $ \DriverParameters{..} →
     runVisitor
-        constructVisitorMode
+        constructExplorationMode
         purity
         (mainParser (liftA2 (,) shared_configuration_term supervisor_configuration_term) program_info)
         initializeGlobalState
@@ -257,10 +257,10 @@ initializeMPI = liftIO c_initializeMPI
 --------------------------------------------------------------------------------
 
 {-| This is the monad in which the MPI controller will run. -}
-newtype MPIControllerMonad visitor_mode α = C { unwrapC :: RequestQueueReader visitor_mode CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO,RequestQueueMonad)
+newtype MPIControllerMonad exploration_mode α = C { unwrapC :: RequestQueueReader exploration_mode CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO,RequestQueueMonad)
 
-instance HasVisitorMode (MPIControllerMonad visitor_mode) where
-    type VisitorModeFor (MPIControllerMonad visitor_mode) = visitor_mode
+instance HasExplorationMode (MPIControllerMonad exploration_mode) where
+    type ExplorationModeFor (MPIControllerMonad exploration_mode) = exploration_mode
 
 --------------------------------------------------------------------------------
 ------------------------------- Generic runners --------------------------------
@@ -280,22 +280,22 @@ WARNING: Do *NOT* use the threaded runtime with this back-end; see the
          warning in the documentation for this module for more details.
  -}
 
-type MPIMonad visitor_mode = SupervisorMonad visitor_mode CInt MPI
+type MPIMonad exploration_mode = SupervisorMonad exploration_mode CInt MPI
 
 {-| This runs the supervisor;  it must be called in process 0. -}
 runSupervisor ::
-    ∀ visitor_mode.
-    ( Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
+    ∀ exploration_mode.
+    ( Serialize (ProgressFor exploration_mode)
+    , Serialize (WorkerFinalProgressFor exploration_mode)
     ) ⇒
     CInt {-^ the number of workers -} →
-    VisitorMode visitor_mode {-^ the visitor mode -} →
-    ProgressFor visitor_mode {-^ the initial progress of the run -} →
-    MPIControllerMonad visitor_mode () {-^ the controller of the supervisor -} →
-    MPI (RunOutcomeFor visitor_mode) {-^ the outcome of the run -}
+    ExplorationMode exploration_mode {-^ the exploration mode -} →
+    ProgressFor exploration_mode {-^ the initial progress of the run -} →
+    MPIControllerMonad exploration_mode () {-^ the controller of the supervisor -} →
+    MPI (RunOutcomeFor exploration_mode) {-^ the outcome of the run -}
 runSupervisor
     number_of_workers
-    visitor_mode
+    exploration_mode
     starting_progress
     (C controller)
  = do
@@ -310,7 +310,7 @@ runSupervisor
 
         sendWorkloadToWorker = sendMessage . StartWorkload
 
-        tryGetRequest :: MPI (Maybe (Either (MPIMonad visitor_mode ()) (CInt,MessageForSupervisorFor visitor_mode)))
+        tryGetRequest :: MPI (Maybe (Either (MPIMonad exploration_mode ()) (CInt,MessageForSupervisorFor exploration_mode)))
         tryGetRequest = do
             maybe_message ← tryReceiveMessage
             case maybe_message of
@@ -323,7 +323,7 @@ runSupervisor
     debugM "Entering supervisor loop..."
     supervisor_outcome ←
         runSupervisorStartingFrom
-            visitor_mode
+            exploration_mode
             starting_progress
             (SupervisorCallbacks{..})
             (PollingProgram
@@ -349,7 +349,7 @@ runSupervisor
     let confirmShutdown remaining_workers
           | Set.null remaining_workers = return ()
           | otherwise =
-            (tryReceiveMessage :: MPI (Maybe (CInt,MessageForSupervisorFor visitor_mode))) >>=
+            (tryReceiveMessage :: MPI (Maybe (CInt,MessageForSupervisorFor exploration_mode))) >>=
             maybe (confirmShutdown remaining_workers) (\(worker_id,message) →
                 case message of
                     WorkerQuit → confirmShutdown (Set.delete worker_id remaining_workers)
@@ -360,21 +360,21 @@ runSupervisor
 
 {-| Runs a worker; it must be called in all processes other than process 0. -}
 runWorker ::
-    ( Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
+    ( Serialize (ProgressFor exploration_mode)
+    , Serialize (WorkerFinalProgressFor exploration_mode)
     ) ⇒
-    VisitorMode visitor_mode {-^ the mode in to visit the tree -} →
+    ExplorationMode exploration_mode {-^ the mode in to explore the tree -} →
     Purity m n {-^ the purity of the tree generator -} →
-    TreeGeneratorT m (ResultFor visitor_mode) {-^ the tree generator -} →
+    TreeGeneratorT m (ResultFor exploration_mode) {-^ the tree generator -} →
     MPI ()
 runWorker
-    visitor_mode
+    exploration_mode
     purity
     tree_generator
  = liftIO $ do
     debugM "Entering worker loop..."
     Process.runWorker
-        visitor_mode
+        exploration_mode
         purity
         tree_generator
         (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
@@ -389,25 +389,25 @@ runWorker
     used in all processes, supervisor and worker alike.
  -}
 runVisitor ::
-    ∀ shared_configuration supervisor_configuration visitor_mode m n.
+    ∀ shared_configuration supervisor_configuration exploration_mode m n.
     ( Serialize shared_configuration
-    , Serialize (ProgressFor visitor_mode)
-    , Serialize (WorkerFinalProgressFor visitor_mode)
+    , Serialize (ProgressFor exploration_mode)
+    , Serialize (WorkerFinalProgressFor exploration_mode)
     ) ⇒
-    (shared_configuration → VisitorMode visitor_mode) {-^ construct the visitor mode given the shared configuration -} →
+    (shared_configuration → ExplorationMode exploration_mode) {-^ construct the exploration mode given the shared configuration -} →
     Purity m n {-^ the purity of the tree generator -} →
     IO (shared_configuration,supervisor_configuration) {-^ get the shared and supervisor-specific configuration information (run only on the supervisor) -} →
     (shared_configuration → IO ()) {-^ initialize the global state of the process given the shared configuration (run on both supervisor and worker processes) -} →
-    (shared_configuration → TreeGeneratorT m (ResultFor visitor_mode)) {-^ construct the tree generator from the shared configuration (run only on the worker) -} →
-    (shared_configuration → supervisor_configuration → IO (ProgressFor visitor_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
-    (shared_configuration → supervisor_configuration → MPIControllerMonad visitor_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
-    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor visitor_mode))
+    (shared_configuration → TreeGeneratorT m (ResultFor exploration_mode)) {-^ construct the tree generator from the shared configuration (run only on the worker) -} →
+    (shared_configuration → supervisor_configuration → IO (ProgressFor exploration_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad exploration_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
+    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor exploration_mode))
         {-^ if this process is the supervisor, then returns the outcome of the
             run as well as the configuration information wrapped in 'Just';
             otherwise, if this process is a worker, it returns 'Nothing'
          -}
 runVisitor
-    constructVisitorMode
+    constructExplorationMode
     purity
     getConfiguration
     initializeGlobalState
@@ -433,7 +433,7 @@ runVisitor
                 Just . (configuration,) <$>
                     runSupervisor
                         number_of_workers
-                        (constructVisitorMode shared_configuration)
+                        (constructExplorationMode shared_configuration)
                         starting_progress
                         (constructManager shared_configuration supervisor_configuration)
             else do
@@ -447,7 +447,7 @@ runVisitor
                         liftIO $ initializeGlobalState shared_configuration
                         debugM "Running worker..."
                         runWorker
-                            (constructVisitorMode shared_configuration)
+                            (constructExplorationMode shared_configuration)
                             purity
                             (constructTreeGenerator shared_configuration)
                         return Nothing
