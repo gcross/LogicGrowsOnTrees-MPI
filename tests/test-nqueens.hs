@@ -12,7 +12,7 @@ import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogge
 
 import Visitor.Parallel.Main (TerminationReason(..),mainForVisitTree,runTerminationReason)
 import Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
-import Visitor.Parallel.BackEnd.MPI (driver)
+import Visitor.Parallel.Adapter.MPI (driver)
 import Visitor.Utils.WordSum (WordSum(..))
 
 main =  do

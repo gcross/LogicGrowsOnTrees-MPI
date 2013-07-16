@@ -6,7 +6,7 @@ import Data.Monoid (mempty)
 
 import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
-import Visitor.Parallel.BackEnd.MPI
+import Visitor.Parallel.Adapter.MPI
 import Visitor.Parallel.Common.ExplorationMode
 import Visitor.Parallel.Common.Worker (Purity(Pure))
 import Visitor.Parallel.Main

@@ -11,12 +11,12 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UnicodeSyntax #-}
 
-{-| This back-end implements parallelism by via MPI.  Process 0 is the
+{-| This adapter implements parallelism by via MPI.  Process 0 is the
     supervisor and the other processes are the workers.  (This does mean that
     one process is used only for coordination, but it simplifies things and also
     means that worker requests and responses will be handled promptly.)
 
-    WARNING: Do *NOT* use the threaded runtime with this back-end as it has been
+    WARNING: Do *NOT* use the threaded runtime with this adapter as it has been
              designed with the assumption that the run-time is single-threaded.
              This was done because the MPI implementation might not support
              having multiple operating system threads (even if only one of them
@@ -29,7 +29,7 @@
              the non-threaded runtime. Lightweight Haskell threads, however, are
              just fine.
  -}
-module Visitor.Parallel.BackEnd.MPI
+module Visitor.Parallel.Adapter.MPI
     (
     -- * Driver
       driver
@@ -124,7 +124,7 @@ deriveLoggers "Logger" [DEBUG]
 ------------------------------------ Driver ------------------------------------
 --------------------------------------------------------------------------------
 
-{-| This is the driver for the MPI back-end.  Process 0 acts as the supervisor
+{-| This is the driver for the MPI adapter.  Process 0 acts as the supervisor
     and the other processes act as workers.
 
     WARNING: Do *NOT* use the threaded runtime with this driver (or 'driverMPI'),
@@ -276,7 +276,7 @@ to be done automatically;  if you want full control then call 'runSupervisor'
 in the supervisor process --- which *must* be process 0! --- and call
 'runWorker' in the worker processes, otherwise call 'runVisitor'.
 
-WARNING: Do *NOT* use the threaded runtime with this back-end; see the
+WARNING: Do *NOT* use the threaded runtime with this adapter; see the
          warning in the documentation for this module for more details.
  -}
 
@@ -383,7 +383,7 @@ runWorker
 
 {-| Visits the given tree using MPI to achieve parallelism.
 
-    This function grants access to all of the functionality of this back-end,
+    This function grants access to all of the functionality of this adapter,
     rather than having to go through the more restricted driver interface. The
     signature of this function is very complicated because it is meant to be
     used in all processes, supervisor and worker alike.
