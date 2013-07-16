@@ -58,7 +58,7 @@ module Visitor.Parallel.Adapter.MPI
     -- $runners
     , runSupervisor
     , runWorker
-    , runVisitor
+    , runExplorer
     ) where
 
 
@@ -111,7 +111,7 @@ import Visitor.Parallel.Common.ExplorationMode
 import Visitor.Parallel.Common.Message
 import Visitor.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
 import Visitor.Parallel.Common.Supervisor.RequestQueue
-import Visitor.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runVisitor,runVisitorIO,runVisitorT)
+import Visitor.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runExplorer,runExplorerIO,runExplorerT)
 import Visitor.Workload
 
 --------------------------------------------------------------------------------
@@ -142,8 +142,8 @@ driver =
     case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n exploration_mode) of
         Driver runDriver → Driver (runMPI . runDriver)
 {-| This is the same as 'driver', but runs in the 'MPI' monad.  Use this driver
-    if you want to do other things within 'MPI' (such as starting another
-    parallel visit) after the run completes.
+    if you want to do other things within 'MPI' (such as starting a subsequent
+    parallel exploration) after the run completes.
  -}
 driverMPI ::
     ( Serialize shared_configuration
@@ -152,7 +152,7 @@ driverMPI ::
     ) ⇒ Driver MPI shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driverMPI = Driver $ \DriverParameters{..} →
-    runVisitor
+    runExplorer
         constructExplorationMode
         purity
         (mainParser (liftA2 (,) shared_configuration_term supervisor_configuration_term) program_info)
@@ -274,7 +274,7 @@ factors such as deciding whether a process is the supervisor or a worker and the
 propagation of configuration information to the worker or whether you want this
 to be done automatically;  if you want full control then call 'runSupervisor'
 in the supervisor process --- which *must* be process 0! --- and call
-'runWorker' in the worker processes, otherwise call 'runVisitor'.
+'runWorker' in the worker processes, otherwise call 'runExplorer'.
 
 WARNING: Do *NOT* use the threaded runtime with this adapter; see the
          warning in the documentation for this module for more details.
@@ -388,7 +388,7 @@ runWorker
     signature of this function is very complicated because it is meant to be
     used in all processes, supervisor and worker alike.
  -}
-runVisitor ::
+runExplorer ::
     ∀ shared_configuration supervisor_configuration exploration_mode m n.
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
@@ -406,7 +406,7 @@ runVisitor ::
             run as well as the configuration information wrapped in 'Just';
             otherwise, if this process is a worker, it returns 'Nothing'
          -}
-runVisitor
+runExplorer
     constructExplorationMode
     purity
     getConfiguration
