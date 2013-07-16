@@ -103,7 +103,7 @@ import qualified System.Log.Logger as Logger
 import System.Log.Logger (Priority(DEBUG))
 import System.Log.Logger.TH
 
-import Visitor (TreeGeneratorT)
+import Visitor (TreeT)
 import Visitor.Checkpoint
 import Visitor.Parallel.Main
 import qualified Visitor.Parallel.Common.Process as Process
@@ -157,7 +157,7 @@ driverMPI = Driver $ \DriverParameters{..} →
         purity
         (mainParser (liftA2 (,) shared_configuration_term supervisor_configuration_term) program_info)
         initializeGlobalState
-        constructTreeGenerator
+        constructTree
         getStartingProgress
         constructManager
     >>=
@@ -364,19 +364,19 @@ runWorker ::
     , Serialize (WorkerFinalProgressFor exploration_mode)
     ) ⇒
     ExplorationMode exploration_mode {-^ the mode in to explore the tree -} →
-    Purity m n {-^ the purity of the tree generator -} →
-    TreeGeneratorT m (ResultFor exploration_mode) {-^ the tree generator -} →
+    Purity m n {-^ the purity of the tree -} →
+    TreeT m (ResultFor exploration_mode) {-^ the tree -} →
     MPI ()
 runWorker
     exploration_mode
     purity
-    tree_generator
+    tree
  = liftIO $ do
     debugM "Entering worker loop..."
     Process.runWorker
         exploration_mode
         purity
-        tree_generator
+        tree
         (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
         (unwrapMPI . flip sendMessage 0)
     debugM "Exited worker loop."
@@ -395,10 +395,10 @@ runVisitor ::
     , Serialize (WorkerFinalProgressFor exploration_mode)
     ) ⇒
     (shared_configuration → ExplorationMode exploration_mode) {-^ construct the exploration mode given the shared configuration -} →
-    Purity m n {-^ the purity of the tree generator -} →
+    Purity m n {-^ the purity of the tree -} →
     IO (shared_configuration,supervisor_configuration) {-^ get the shared and supervisor-specific configuration information (run only on the supervisor) -} →
     (shared_configuration → IO ()) {-^ initialize the global state of the process given the shared configuration (run on both supervisor and worker processes) -} →
-    (shared_configuration → TreeGeneratorT m (ResultFor exploration_mode)) {-^ construct the tree generator from the shared configuration (run only on the worker) -} →
+    (shared_configuration → TreeT m (ResultFor exploration_mode)) {-^ construct the tree from the shared configuration (run only on the worker) -} →
     (shared_configuration → supervisor_configuration → IO (ProgressFor exploration_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
     (shared_configuration → supervisor_configuration → MPIControllerMonad exploration_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
     MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor exploration_mode))
@@ -411,7 +411,7 @@ runVisitor
     purity
     getConfiguration
     initializeGlobalState
-    constructTreeGenerator
+    constructTree
     getStartingProgress
     constructManager
   = debugM "Fetching number of processes and whether this is the supervisor process..." >>
@@ -449,5 +449,5 @@ runVisitor
                         runWorker
                             (constructExplorationMode shared_configuration)
                             purity
-                            (constructTreeGenerator shared_configuration)
+                            (constructTree shared_configuration)
                         return Nothing
