@@ -29,7 +29,7 @@
              the non-threaded runtime. Lightweight Haskell threads, however, are
              just fine.
  -}
-module Visitor.Parallel.Adapter.MPI
+module LogicGrowsOnTrees.Parallel.Adapter.MPI
     (
     -- * Driver
       driver
@@ -103,16 +103,16 @@ import qualified System.Log.Logger as Logger
 import System.Log.Logger (Priority(DEBUG))
 import System.Log.Logger.TH
 
-import Visitor (TreeT)
-import Visitor.Checkpoint
-import Visitor.Parallel.Main
-import qualified Visitor.Parallel.Common.Process as Process
-import Visitor.Parallel.Common.ExplorationMode
-import Visitor.Parallel.Common.Message
-import Visitor.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
-import Visitor.Parallel.Common.Supervisor.RequestQueue
-import Visitor.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runExplorer,runExplorerIO,runExplorerT)
-import Visitor.Workload
+import LogicGrowsOnTrees (TreeT)
+import LogicGrowsOnTrees.Checkpoint
+import LogicGrowsOnTrees.Parallel.Main
+import qualified LogicGrowsOnTrees.Parallel.Common.Process as Process
+import LogicGrowsOnTrees.Parallel.Common.ExplorationMode
+import LogicGrowsOnTrees.Parallel.Common.Message
+import LogicGrowsOnTrees.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
+import LogicGrowsOnTrees.Parallel.Common.Supervisor.RequestQueue
+import LogicGrowsOnTrees.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload,runExplorer,runExplorerIO,runExplorerT)
+import LogicGrowsOnTrees.Workload
 
 --------------------------------------------------------------------------------
 ----------------------------------- Loggers ------------------------------------
@@ -179,7 +179,7 @@ runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
 
 {-| Gets the total number of processes and whether this process is process 0. -}
 getMPIInformation :: MPI (Bool,CInt)
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_getMPIInformation" c_getMPIInformation :: Ptr CInt → Ptr CInt → IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_getMPIInformation" c_getMPIInformation :: Ptr CInt → Ptr CInt → IO ()
 getMPIInformation = do
     (i_am_supervisor,number_of_workers) ← liftIO $
         alloca $ \p_i_am_supervisor →
@@ -194,7 +194,7 @@ getMPIInformation = do
 
 {-| Receves a message broadcast from process 0 (which must not be this process). -}
 receiveBroadcastMessage :: Serialize α ⇒ MPI α
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_receiveBroadcastMessage" c_receiveBroadcastMessage :: Ptr (Ptr CChar) → Ptr CInt → IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_receiveBroadcastMessage" c_receiveBroadcastMessage :: Ptr (Ptr CChar) → Ptr CInt → IO ()
 receiveBroadcastMessage = liftIO $
     alloca $ \p_p_message →
     alloca $ \p_size → do
@@ -207,14 +207,14 @@ receiveBroadcastMessage = liftIO $
 
 {-| Sends a message broadcast from this process, which must be process 0. -}
 sendBroadcastMessage :: Serialize α ⇒ α → MPI ()
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_sendBroadcastMessage" c_sendBroadcastMessage :: Ptr CChar → CInt → IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_sendBroadcastMessage" c_sendBroadcastMessage :: Ptr CChar → CInt → IO ()
 sendBroadcastMessage message = liftIO $
     unsafeUseAsCStringLen (encode message) $ \(p_message,size) →
         c_sendBroadcastMessage p_message (fromIntegral size)
 
 {-| Sends a message to another process. -}
 sendMessage :: Serialize α ⇒ α → CInt → MPI ()
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_sendMessage" c_sendMessage :: Ptr CChar → CInt → CInt → IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_sendMessage" c_sendMessage :: Ptr CChar → CInt → CInt → IO ()
 sendMessage message destination = liftIO $
     unsafeUseAsCStringLen (encode message) $ \(p_message,size) →
         c_sendMessage p_message (fromIntegral size) destination
@@ -224,7 +224,7 @@ sendMessage message destination = liftIO $
     available.
  -}
 tryReceiveMessage :: Serialize α ⇒ MPI (Maybe (CInt,α))
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_tryReceiveMessage" c_tryReceiveMessage :: Ptr CInt → Ptr (Ptr CChar) → Ptr CInt → IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_tryReceiveMessage" c_tryReceiveMessage :: Ptr CInt → Ptr (Ptr CChar) → Ptr CInt → IO ()
 tryReceiveMessage = liftIO $
     alloca $ \p_source →
     alloca $ \p_p_message →
@@ -245,11 +245,11 @@ tryReceiveMessage = liftIO $
 --------------------------------------------------------------------------------
 
 finalizeMPI :: MPI ()
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_finalizeMPI" c_finalizeMPI :: IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_finalizeMPI" c_finalizeMPI :: IO ()
 finalizeMPI = liftIO c_finalizeMPI
 
 initializeMPI :: MPI ()
-foreign import ccall unsafe "Visitor-MPI.h Visitor_MPI_initializeMPI" c_initializeMPI :: IO ()
+foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_initializeMPI" c_initializeMPI :: IO ()
 initializeMPI = liftIO c_initializeMPI
 
 --------------------------------------------------------------------------------
@@ -381,7 +381,7 @@ runWorker
         (unwrapMPI . flip sendMessage 0)
     debugM "Exited worker loop."
 
-{-| Visits the given tree using MPI to achieve parallelism.
+{-| Explores the given tree using MPI to achieve parallelism.
 
     This function grants access to all of the functionality of this adapter,
     rather than having to go through the more restricted driver interface. The

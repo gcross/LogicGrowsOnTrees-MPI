@@ -10,10 +10,10 @@ import Data.Serialize (Serialize(..))
 import System.Console.CmdTheLine
 import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
-import Visitor.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
-import Visitor.Parallel.Adapter.MPI (driver)
-import Visitor.Parallel.Main (TerminationReason(..),mainForExploreTree,runTerminationReason)
-import Visitor.Utils.WordSum (WordSum(..))
+import LogicGrowsOnTrees.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
+import LogicGrowsOnTrees.Parallel.Adapter.MPI (driver)
+import LogicGrowsOnTrees.Parallel.Main (TerminationReason(..),mainForExploreTree,runTerminationReason)
+import LogicGrowsOnTrees.Utils.WordSum (WordSum(..))
 
 main =  do
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG)

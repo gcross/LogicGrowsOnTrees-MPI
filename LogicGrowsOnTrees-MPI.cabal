@@ -1,12 +1,12 @@
-Name:                Visitor-MPI
+Name:                LogicGrowsOnTrees-MPI
 Version:             1.0
 License:             BSD3
 License-file:        LICENSE
 Author:              Gregory Crosswhite
 Maintainer:          Gregory Crosswhite <gcrosswhite@gmail.com>
 Stability:           Provisional
-Synopsis:            a back-end for the Visitor package that uses MPI
-Description:         This package provides a back-end for the Visitor package
+Synopsis:            a adapter for the LogicGrowsOnTrees package that uses MPI
+Description:         This package provides a adapter for the LogicGrowsOnTrees package
                      that uses MPI for parallelism.  See the module
                      documentation for more details.
                      .
@@ -24,15 +24,15 @@ Description:         This package provides a back-end for the Visitor package
 Cabal-version:       >=1.8
 Build-type:          Simple
 Category:	     
-Extra-source-files:  c-sources/Visitor-MPI.c c-sources/Visitor-MPI.h
+Extra-source-files:  c-sources/LogicGrowsOnTrees-MPI.c c-sources/LogicGrowsOnTrees-MPI.h
 
 Source-Repository head
   Type:                git
-  Location:            git://github.com/gcross/Visitor-MPI.git
+  Location:            git://github.com/gcross/LogicGrowsOnTrees-MPI.git
 
 Source-Repository this
     Type:                git
-    Location:            git://github.com/gcross/Visitor-MPI.git
+    Location:            git://github.com/gcross/LogicGrowsOnTrees-MPI.git
 --    Tag:                 
 
 Library
@@ -49,12 +49,12 @@ Library
         MonadCatchIO-transformers == 0.3.*,
         stm == 2.4.*,
         transformers >= 0.2 && < 0.4,
-        Visitor == 1.0.*
+        LogicGrowsOnTrees == 1.0.*
     Hs-source-dirs: sources
     Extra-libraries: mpi
-    C-sources: c-sources/Visitor-MPI.c
+    C-sources: c-sources/LogicGrowsOnTrees-MPI.c
     Exposed-modules:
-        Visitor.Parallel.Adapter.MPI
+        LogicGrowsOnTrees.Parallel.Adapter.MPI
 
 Flag tests
     Description: Enable building the n-queens executables.
@@ -66,10 +66,10 @@ Executable test-trivial
     Build-depends:
         base > 4 && < 5,
         hslogger == 1.2.*,
-        Visitor == 1.0.*,
-        Visitor-MPI
+        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees-MPI
     Extra-libraries: mpi
-    C-sources: c-sources/Visitor-MPI.c
+    C-sources: c-sources/LogicGrowsOnTrees-MPI.c
     if flag(tests)
         Buildable: True
     else
@@ -83,10 +83,10 @@ Executable test-nqueens
         cereal == 0.3.*,
         cmdtheline == 0.2.*,
         hslogger == 1.2.*,
-        Visitor == 1.0.*,
-        Visitor-MPI
+        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees-MPI
     Extra-libraries: mpi
-    C-sources: c-sources/Visitor-MPI.c
+    C-sources: c-sources/LogicGrowsOnTrees-MPI.c
     if flag(tests)
         Buildable: True
     else

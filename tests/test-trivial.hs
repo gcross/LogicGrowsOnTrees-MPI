@@ -6,10 +6,10 @@ import Data.Monoid (mempty)
 
 import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
-import Visitor.Parallel.Adapter.MPI
-import Visitor.Parallel.Common.ExplorationMode
-import Visitor.Parallel.Common.Worker (Purity(Pure))
-import Visitor.Parallel.Main
+import LogicGrowsOnTrees.Parallel.Adapter.MPI
+import LogicGrowsOnTrees.Parallel.Common.ExplorationMode
+import LogicGrowsOnTrees.Parallel.Common.Worker (Purity(Pure))
+import LogicGrowsOnTrees.Parallel.Main
 
 main =
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG) >>
