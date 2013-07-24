@@ -8,7 +8,7 @@ import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogge
 
 import LogicGrowsOnTrees.Parallel.Adapter.MPI
 import LogicGrowsOnTrees.Parallel.Common.ExplorationMode
-import LogicGrowsOnTrees.Parallel.Common.Worker (Purity(Pure))
+import LogicGrowsOnTrees.Parallel.Common.Purity (Purity(Pure))
 import LogicGrowsOnTrees.Parallel.Main
 
 main =
