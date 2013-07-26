@@ -54,6 +54,10 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
     , getNumberOfWorkersAsync
     , requestProgressUpdate
     , requestProgressUpdateAsync
+    -- * Outcome types
+    , RunOutcome(..)
+    , RunStatistics(..)
+    , TerminationReason(..)
     -- * Generic runners
     -- $runners
     , runSupervisor
