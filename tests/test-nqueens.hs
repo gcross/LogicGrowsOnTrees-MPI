@@ -33,6 +33,6 @@ main =  do
                     putStrLn $ "Correctly found all " ++ show number_of_solutions ++ " solutions for board size " ++ show n ++ "."
                  | otherwise →
                     error $ "Found " ++ show number_of_solutions ++ " instead of " ++ show (nqueensCorrectCount n) ++ " solutions for board size " ++ show n ++ "."
-                Failure description → error $ "Explorer failed with reason " ++ show description ++ "."
+                Failure progress description → error $ "Explorer failed with progress " ++ show progress ++ " and reason " ++ show description ++ "."
         )
         nqueensCount

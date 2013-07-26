@@ -27,4 +27,4 @@ main =
         Just (Aborted progress) → error $ "Explorer aborted with progress " ++ show progress ++ "."
         Just (Completed [()]) → putStrLn $ "Trivial search completed successfully."
         Just (Completed result) → error $ "Result was " ++ show result ++ " not [()]."
-        Just (Failure description) → error $ "Explorer failed with reason " ++ show description ++ "."
+        Just (Failure progress description) → error $ "Explorer failed with progress " ++ show progress ++ " and reason " ++ show description ++ "."
