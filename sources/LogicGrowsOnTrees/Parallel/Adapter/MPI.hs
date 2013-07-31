@@ -306,7 +306,7 @@ runSupervisor
  = do
     debugM "Creating request queue and forking controller thread..."
     request_queue ← newRequestQueue
-    _ ← liftIO . forkIO $ runReaderT controller request_queue
+    forkControllerThread request_queue controller
     let broadcastProgressUpdateToWorkers = mapM_ (sendMessage RequestProgressUpdate)
 
         broadcastWorkloadStealToWorkers = mapM_ (sendMessage RequestWorkloadSteal)
@@ -350,6 +350,7 @@ runSupervisor
                         error $ "Worker " ++ show worker_id ++ " has quit prematurely."
             )
     debugM "Exited supervisor loop;  shutting down workers..."
+    killControllerThreads request_queue
     mapM_ (sendMessage QuitWorker) [1..number_of_workers]
     let confirmShutdown remaining_workers
           | Set.null remaining_workers = return ()
