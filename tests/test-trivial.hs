@@ -7,9 +7,9 @@ import Data.Monoid (mempty)
 import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
 import LogicGrowsOnTrees.Parallel.Adapter.MPI
-import LogicGrowsOnTrees.Parallel.Common.ExplorationMode
-import LogicGrowsOnTrees.Parallel.Common.Purity (Purity(Pure))
+import LogicGrowsOnTrees.Parallel.ExplorationMode
 import LogicGrowsOnTrees.Parallel.Main
+import LogicGrowsOnTrees.Parallel.Purity (Purity(Pure))
 
 main =
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG) >>
