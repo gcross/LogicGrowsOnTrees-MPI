@@ -114,8 +114,8 @@ import qualified LogicGrowsOnTrees.Parallel.Common.Process as Process
 import LogicGrowsOnTrees.Parallel.Common.ExplorationMode
 import LogicGrowsOnTrees.Parallel.Common.Message
 import LogicGrowsOnTrees.Parallel.Common.Purity
+import LogicGrowsOnTrees.Parallel.Common.RequestQueue
 import LogicGrowsOnTrees.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
-import LogicGrowsOnTrees.Parallel.Common.Supervisor.RequestQueue
 import LogicGrowsOnTrees.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload)
 import LogicGrowsOnTrees.Workload
 
