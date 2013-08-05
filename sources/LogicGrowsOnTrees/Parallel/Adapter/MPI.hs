@@ -164,7 +164,7 @@ driverMPI = Driver $ \DriverParameters{..} →
         initializeGlobalState
         constructTree
         getStartingProgress
-        constructManager
+        constructController
     >>=
     maybe (return ()) (liftIO . (notifyTerminated <$> fst . fst <*> snd . fst <*> snd))
 
@@ -419,7 +419,7 @@ runExplorer
     initializeGlobalState
     constructTree
     getStartingProgress
-    constructManager
+    constructController
   = debugM "Fetching number of processes and whether this is the supervisor process..." >>
     getMPIInformation >>=
     \(i_am_supervisor,number_of_workers) →
@@ -441,7 +441,7 @@ runExplorer
                         number_of_workers
                         (constructExplorationMode shared_configuration)
                         starting_progress
-                        (constructManager shared_configuration supervisor_configuration)
+                        (constructController shared_configuration supervisor_configuration)
             else do
                 debugM "I am the worker process."
                 debugM "Getting shared configuration from broadcast..."
