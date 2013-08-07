@@ -54,6 +54,7 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
     , getNumberOfWorkersAsync
     , requestProgressUpdate
     , requestProgressUpdateAsync
+    , setWorkloadBufferSize
     -- * Outcome types
     , RunOutcome(..)
     , RunStatistics(..)
@@ -113,7 +114,7 @@ import LogicGrowsOnTrees.Parallel.Main
 import qualified LogicGrowsOnTrees.Parallel.Common.Process as Process
 import LogicGrowsOnTrees.Parallel.Common.Message
 import LogicGrowsOnTrees.Parallel.Common.RequestQueue
-import LogicGrowsOnTrees.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor)
+import LogicGrowsOnTrees.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor,setWorkloadBufferSize)
 import LogicGrowsOnTrees.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload)
 import LogicGrowsOnTrees.Parallel.ExplorationMode
 import LogicGrowsOnTrees.Parallel.Purity
