@@ -48,12 +48,12 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
     , MPIControllerMonad
     , abort
     , fork
-    , getCurrentProgress
     , getCurrentProgressAsync
-    , getNumberOfWorkers
+    , getCurrentProgress
     , getNumberOfWorkersAsync
-    , requestProgressUpdate
+    , getNumberOfWorkers
     , requestProgressUpdateAsync
+    , requestProgressUpdate
     , setWorkloadBufferSize
     -- * Outcome types
     , RunOutcome(..)
