@@ -141,7 +141,7 @@ driver ::
     ∀ shared_configuration supervisor_configuration m n exploration_mode.
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
-    , Serialize (WorkerFinalProgressFor exploration_mode)
+    , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driver =
@@ -154,7 +154,7 @@ driver =
 driverMPI ::
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
-    , Serialize (WorkerFinalProgressFor exploration_mode)
+    , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒ Driver MPI shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driverMPI = Driver $ \DriverParameters{..} →
@@ -292,7 +292,7 @@ type MPIMonad exploration_mode = SupervisorMonad exploration_mode CInt MPI
 runSupervisor ::
     ∀ exploration_mode.
     ( Serialize (ProgressFor exploration_mode)
-    , Serialize (WorkerFinalProgressFor exploration_mode)
+    , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒
     CInt {-^ the number of workers -} →
     ExplorationMode exploration_mode {-^ the exploration mode -} →
@@ -368,7 +368,7 @@ runSupervisor
 {-| Runs a worker; it must be called in all processes other than process 0. -}
 runWorker ::
     ( Serialize (ProgressFor exploration_mode)
-    , Serialize (WorkerFinalProgressFor exploration_mode)
+    , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒
     ExplorationMode exploration_mode {-^ the mode in to explore the tree -} →
     Purity m n {-^ the purity of the tree -} →
@@ -399,7 +399,7 @@ runExplorer ::
     ∀ shared_configuration supervisor_configuration exploration_mode m n.
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
-    , Serialize (WorkerFinalProgressFor exploration_mode)
+    , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒
     (shared_configuration → ExplorationMode exploration_mode) {-^ construct the exploration mode given the shared configuration -} →
     Purity m n {-^ the purity of the tree -} →
