@@ -11,10 +11,11 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UnicodeSyntax #-}
 
-{-| This adapter implements parallelism by via MPI.  Process 0 is the
-    supervisor and the other processes are the workers.  (This does mean that
-    one process is used only for coordination, but it simplifies things and also
-    means that worker requests and responses will be handled promptly.)
+{-| This adapter implements parallelism by via MPI;  process 0 is the
+    supervisor and the other processes are the workers. (This does mean that one
+    process is used only for coordination, but this approach simplifies things
+    and also ensures that worker requests and responses will be handled
+    promptly.)
 
     WARNING: Do *NOT* use the threaded runtime with this adapter as it has been
              designed with the assumption that the run-time is single-threaded.
@@ -26,8 +27,7 @@
              core so multiple threads will not result in better performance but
              rather in multiple processes fighting over the same CPU core, as
              well as the additional overhead of the threaded runtime compared to
-             the non-threaded runtime. Lightweight Haskell threads, however, are
-             just fine.
+             the non-threaded runtime.
  -}
 module LogicGrowsOnTrees.Parallel.Adapter.MPI
     (
@@ -130,10 +130,10 @@ deriveLoggers "Logger" [DEBUG]
 ------------------------------------ Driver ------------------------------------
 --------------------------------------------------------------------------------
 
-{-| This is the driver for the MPI adapter.  Process 0 acts as the supervisor
+{-| This is the driver for the MPI adapter;  process 0 acts as the supervisor
     and the other processes act as workers.
 
-    WARNING: Do *NOT* use the threaded runtime with this driver (or 'driverMPI'),
+    WARNING: Do *NOT* use the threaded runtime with this driver (or 'driverMPI');
              see the warning in the documentation for this module for more
              details.
  -}
@@ -147,9 +147,9 @@ driver ::
 driver =
     case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n exploration_mode) of
         Driver runDriver → Driver (runMPI . runDriver)
-{-| This is the same as 'driver', but runs in the 'MPI' monad.  Use this driver
-    if you want to do other things within 'MPI' (such as starting a subsequent
-    parallel exploration) after the run completes.
+{-| The same as 'driver', but runs in the 'MPI' monad;  use this driver if you
+    want to do other things within 'MPI' (such as starting a subsequent parallel
+    exploration) after the run completes.
  -}
 driverMPI ::
     ( Serialize shared_configuration
@@ -175,7 +175,7 @@ driverMPI = Driver $ \DriverParameters{..} →
 
 {-| This monad exists in order to ensure that the MPI system is initialized
     before it is used and finalized when we are done;  all MPI operations are
-    run within it, which itself is run by using the 'runMPI' function.
+    run within it, and it itself is run by using the 'runMPI' function.
  -}
 newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
 
@@ -401,17 +401,36 @@ runExplorer ::
     , Serialize (ProgressFor exploration_mode)
     , Serialize (WorkerFinishedProgressFor exploration_mode)
     ) ⇒
-    (shared_configuration → ExplorationMode exploration_mode) {-^ construct the exploration mode given the shared configuration -} →
+    (shared_configuration → ExplorationMode exploration_mode)
+        {-^ a function that constructs the exploration mode given the shared
+            configuration
+         -} →
     Purity m n {-^ the purity of the tree -} →
-    IO (shared_configuration,supervisor_configuration) {-^ get the shared and supervisor-specific configuration information (run only on the supervisor) -} →
-    (shared_configuration → IO ()) {-^ initialize the global state of the process given the shared configuration (run on both supervisor and worker processes) -} →
-    (shared_configuration → TreeT m (ResultFor exploration_mode)) {-^ construct the tree from the shared configuration (run only on the worker) -} →
-    (shared_configuration → supervisor_configuration → IO (ProgressFor exploration_mode)) {-^ get the starting progress given the full configuration information (run only on the supervisor) -} →
-    (shared_configuration → supervisor_configuration → MPIControllerMonad exploration_mode ()) {-^ construct the controller for the supervisor (run only on the supervisor) -} →
+    IO (shared_configuration,supervisor_configuration)
+        {-^ an action that gets the shared and supervisor-specific configuration
+            information (run only on the supervisor)
+         -} →
+    (shared_configuration → IO ())
+        {-^ an action that initializes the global state of the process given the
+            shared configuration (run on both supervisor and worker processes)
+         -} →
+    (shared_configuration → TreeT m (ResultFor exploration_mode))
+        {-^ a function that constructs the tree from the shared configuration
+            (called only on the worker)
+         -} →
+    (shared_configuration → supervisor_configuration → IO (ProgressFor exploration_mode))
+        {-^ an action that gets the starting progress given the full
+            configuration information (run only on the supervisor)
+         -} →
+    (shared_configuration → supervisor_configuration → MPIControllerMonad exploration_mode ())
+        {-^ a function that constructs the controller for the supervisor, which
+            must at least set the number of workers to be non-zero (called only
+            on the supervisor)
+         -} →
     MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor exploration_mode))
-        {-^ if this process is the supervisor, then returns the outcome of the
-            run as well as the configuration information wrapped in 'Just';
-            otherwise, if this process is a worker, it returns 'Nothing'
+        {-^ if this process is the supervisor, then the outcome of the run as
+            well as the configuration information wrapped in 'Just'; otherwise
+            'Nothing'
          -}
 runExplorer
     constructExplorationMode
