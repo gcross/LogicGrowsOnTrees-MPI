@@ -70,33 +70,18 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
 import Prelude hiding (catch)
 
 import Control.Applicative ((<$>),(<*>),Applicative(),liftA2)
-import Control.Arrow ((&&&),second)
-import Control.Concurrent (forkIO,killThread,threadDelay,yield)
-import Control.Concurrent.MVar
-import Control.Concurrent.STM (atomically)
-import Control.Concurrent.STM.TChan
-import Control.Exception (AsyncException(ThreadKilled),SomeException,onException,throwIO)
-import Control.Monad (forever,forM_,join,liftM2,mapM_,unless,void,when)
+import Control.Concurrent (threadDelay)
+import Control.Exception (onException)
+import Control.Monad (liftM2,unless)
 import Control.Monad.CatchIO (MonadCatchIO(..),finally)
 import Control.Monad.Fix (MonadFix())
 import Control.Monad.IO.Class (MonadIO(liftIO))
-import Control.Monad.Trans.Class (lift)
-import Control.Monad.Trans.Reader (ReaderT,ask,runReaderT)
 
-import qualified Data.ByteString as BS
 import Data.ByteString (packCStringLen)
 import Data.ByteString.Unsafe (unsafeUseAsCStringLen)
-import Data.Derive.Serialize
-import Data.DeriveTH
 import Data.Function (fix)
-import Data.Functor ((<$>))
-import Data.IORef
-import qualified Data.IVar as IVar
-import Data.IVar (IVar)
-import Data.Monoid (Monoid())
 import Data.Serialize
 import qualified Data.Set as Set
-import Data.Set (Set)
 
 import Foreign.C.Types (CChar,CInt(..))
 import Foreign.Marshal.Alloc (alloca,free)
@@ -109,16 +94,13 @@ import System.Log.Logger (Priority(DEBUG))
 import System.Log.Logger.TH
 
 import LogicGrowsOnTrees (TreeT)
-import LogicGrowsOnTrees.Checkpoint
 import LogicGrowsOnTrees.Parallel.Main
 import qualified LogicGrowsOnTrees.Parallel.Common.Process as Process
 import LogicGrowsOnTrees.Parallel.Common.Message
 import LogicGrowsOnTrees.Parallel.Common.RequestQueue
 import LogicGrowsOnTrees.Parallel.Common.Supervisor hiding (getCurrentProgress,getNumberOfWorkers,runSupervisor,setWorkloadBufferSize)
-import LogicGrowsOnTrees.Parallel.Common.Worker hiding (ProgressUpdate,StolenWorkload)
 import LogicGrowsOnTrees.Parallel.ExplorationMode
 import LogicGrowsOnTrees.Parallel.Purity
-import LogicGrowsOnTrees.Workload
 
 --------------------------------------------------------------------------------
 ----------------------------------- Loggers ------------------------------------
@@ -206,7 +188,7 @@ receiveBroadcastMessage = liftIO $
     alloca $ \p_size → do
         c_receiveBroadcastMessage p_p_message p_size
         p_message ← peek p_p_message
-        size ← fromIntegral <$> peek p_size
+        size ← peek p_size
         message ← packCStringLen (p_message,fromIntegral size)
         free p_message
         return . either error id . decode $ message
@@ -241,7 +223,7 @@ tryReceiveMessage = liftIO $
             then return Nothing
             else do
                 p_message ← peek p_p_message
-                size ← fromIntegral <$> peek p_size
+                size ← peek p_size
                 message ← packCStringLen (p_message,fromIntegral size)
                 free p_message
                 return $ Just (source,either error id . decode $ message)
@@ -263,7 +245,9 @@ initializeMPI = liftIO c_initializeMPI
 --------------------------------------------------------------------------------
 
 {-| This is the monad in which the MPI controller will run. -}
-newtype MPIControllerMonad exploration_mode α = C { unwrapC :: RequestQueueReader exploration_mode CInt MPI α} deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO,RequestQueueMonad)
+newtype MPIControllerMonad exploration_mode α =
+    C (RequestQueueReader exploration_mode CInt MPI α)
+  deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO,RequestQueueMonad)
 
 instance HasExplorationMode (MPIControllerMonad exploration_mode) where
     type ExplorationModeFor (MPIControllerMonad exploration_mode) = exploration_mode

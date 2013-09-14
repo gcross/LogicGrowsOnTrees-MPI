@@ -1,16 +1,12 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UnicodeSyntax #-}
 
-import Control.Monad ((>=>))
-
 import Data.Functor ((<$>))
-import Data.Monoid (Sum(..),mempty)
-import Data.Serialize (Serialize(..))
 
 import System.Console.CmdTheLine
 import System.Log.Logger (Priority(..),rootLoggerName,setLevel,updateGlobalLogger)
 
-import LogicGrowsOnTrees.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount,nqueens_maximum_size)
+import LogicGrowsOnTrees.Examples.Queens (BoardSize(..),nqueensCorrectCount,nqueensCount)
 import LogicGrowsOnTrees.Parallel.Adapter.MPI (driver)
 import LogicGrowsOnTrees.Parallel.Main (TerminationReason(..),mainForExploreTree,runTerminationReason)
 import LogicGrowsOnTrees.Utils.WordSum (WordSum(..))
