@@ -9,6 +9,10 @@ Cabal-version:       >=1.8
 Build-type:          Simple
 Category:            Control, Distributed Computing, Logic, Parallelism
 Description:
+    <http://gcross.github.io/LogicGrowsOnTrees-MPI IF YOU ARE READING THIS ON HACKAGE then click here to browse the package reference documentation.>
+    (The package unfortunately cannot be built on the Hackage server because
+    MPI is not installed on it.)
+    .
     This package provides a adapter for the LogicGrowsOnTrees package that uses
     MPI for parallelism. See the module documentation for more details.
     .
