@@ -7,7 +7,7 @@ Maintainer:          Gregory Crosswhite <gcrosswhite@gmail.com>
 Synopsis:            a adapter for the LogicGrowsOnTrees package that uses MPI
 Cabal-version:       >=1.8
 Build-type:          Simple
-Category:	         Control, Distributed Computing, Logic, Parallelism
+Category:            Control, Distributed Computing, Logic, Parallelism
 Description:
     This package provides a adapter for the LogicGrowsOnTrees package that uses
     MPI for parallelism. See the module documentation for more details.
@@ -22,6 +22,8 @@ Description:
            @--extra-include-dirs=...@ and @--extra-lib-dirs=...@ options.
 
 Extra-source-files:  c-sources/LogicGrowsOnTrees-MPI.c c-sources/LogicGrowsOnTrees-MPI.h
+
+Bug-reports: https://github.com/gcross/LogicGrowsOnTrees-MPI/issues
 
 Source-Repository head
     Type:     git
