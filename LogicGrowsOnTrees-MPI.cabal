@@ -50,7 +50,7 @@ Library
         hslogger == 1.2.*,
         hslogger-template == 2.0.*,
         MonadCatchIO-transformers == 0.3.*,
-        stm == 2.4.*,
+        stm >= 2.3 && < 2.5,
         transformers >= 0.2 && < 0.4,
         LogicGrowsOnTrees == 1.0.*
     Hs-source-dirs: sources
