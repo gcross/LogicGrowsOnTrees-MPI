@@ -129,6 +129,8 @@ driver ::
 driver =
     case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n exploration_mode) of
         Driver runDriver → Driver (runMPI . runDriver)
+{-# INLINE driver #-}
+
 {-| The same as 'driver', but runs in the 'MPI' monad;  use this driver if you
     want to do other things within 'MPI' (such as starting a subsequent parallel
     exploration) after the run completes.
@@ -150,6 +152,7 @@ driverMPI = Driver $ \DriverParameters{..} →
         constructController
     >>=
     maybe (return ()) (liftIO . (notifyTerminated <$> fst . fst <*> snd . fst <*> snd))
+{-# INLINE driverMPI #-}
 
 --------------------------------------------------------------------------------
 ------------------------------------- MPI -------------------------------------
@@ -348,6 +351,7 @@ runSupervisor
             )
     confirmShutdown $ Set.fromList [1..number_of_workers]
     return $ extractRunOutcomeFromSupervisorOutcome supervisor_outcome
+{-# INLINE runSupervisor #-}
 
 {-| Runs a worker; it must be called in all processes other than process 0. -}
 runWorker ::
@@ -371,6 +375,7 @@ runWorker
         (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
         (unwrapMPI . flip sendMessage 0)
     debugM "Exited worker loop."
+{-# INLINE runWorker #-}
 
 {-| Explores the given tree using MPI to achieve parallelism.
 
@@ -461,3 +466,4 @@ runExplorer
                             purity
                             (constructTree shared_configuration)
                         return Nothing
+{-# INLINE runExplorer #-}

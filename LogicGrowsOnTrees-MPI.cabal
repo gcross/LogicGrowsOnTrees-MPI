@@ -65,9 +65,31 @@ Flag warnings
     Description: Enables most warnings.
     Default:     False
 
-Flag tests
-    Description: Enable building the n-queens executables.
+Flag examples
+    Description: Enable building the example executables.
     Default:     False
+
+Flag tests
+    Description: Enable building the test executables.
+    Default:     False
+
+Executable count-all-trivial-tree-leavesl
+    Main-is:    count-all-trivial-tree-leaves.hs
+    Hs-source-dirs: examples
+    Build-depends:
+        base > 4 && < 5,
+        cmdtheline == 0.2.*,
+        hslogger == 1.2.*,
+        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees-MPI
+    Extra-libraries: mpi
+    C-sources: c-sources/LogicGrowsOnTrees-MPI.c
+    if flag(examples)
+        Buildable: True
+    else
+        Buildable: False
+    if flag(warnings)
+        GHC-Options: -Wall -fno-warn-name-shadowing
 
 Executable test-trivial
     Main-is:    test-trivial.hs
