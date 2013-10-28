@@ -39,7 +39,7 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
     , driverMPI
     -- * MPI
     -- ** Monad and runner
-    , MPI
+    , MPI()
     , withMPI
     -- ** Information and communication
     , getMPIInformation
@@ -139,7 +139,7 @@ driver ::
     ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driver =
-    let ?mpi_secret =  error "the MPI secret is not meant to be used as a value"
+    let ?mpi_secret =  MPISecret
     in case (driverMPI :: Driver IO shared_configuration supervisor_configuration m n exploration_mode) of
         Driver runDriver → Driver runDriver
 {-# INLINE driver #-}
@@ -172,7 +172,7 @@ driverMPI = Driver $ \DriverParameters{..} →
 ------------------------------------- MPI -------------------------------------
 --------------------------------------------------------------------------------
 
-data MPISecret {- This is *not* meant to be exported. -}
+data MPISecret = MPISecret {- This is *not* meant to be exported. -}
 
 {-| This constraint exists in order to ensure that the MPI system is initialized
     before it is used and finalized when we are done;  all MPI operations are
@@ -183,7 +183,7 @@ type MPI = ?mpi_secret :: MPISecret
 {-| Initilizes MPI, runs the given action, and then finalizes MPI. -}
 withMPI :: (MPI ⇒ IO α) → IO α
 withMPI action =
-    let ?mpi_secret = error "the MPI secret is not meant to be used as a value"
+    let ?mpi_secret = MPISecret
     in bracket initializeMPI (const finalizeMPI) (const action)
 
 {-| Gets the total number of processes and whether this process is process 0. -}
