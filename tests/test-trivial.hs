@@ -13,7 +13,7 @@ import LogicGrowsOnTrees.Parallel.Purity (Purity(Pure))
 
 main =
     -- updateGlobalLogger rootLoggerName (setLevel DEBUG) >>
-    (runMPI $
+    (withMPI $
         runExplorer
             (const AllMode)
             Pure

@@ -1,7 +1,10 @@
+{-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ForeignFunctionInterface #-}
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ImplicitParams #-}
 {-# LANGUAGE NamedFieldPuns #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE RecordWildCards #-}
@@ -37,7 +40,7 @@ module LogicGrowsOnTrees.Parallel.Adapter.MPI
     -- * MPI
     -- ** Monad and runner
     , MPI
-    , runMPI
+    , withMPI
     -- ** Information and communication
     , getMPIInformation
     , receiveBroadcastMessage
@@ -75,7 +78,7 @@ import Control.Applicative ((<$>),(<*>),Applicative(),liftA2)
 import Control.Concurrent (threadDelay)
 import Control.Exception (onException)
 import Control.Monad (liftM2,unless)
-import Control.Monad.CatchIO (MonadCatchIO(..),finally)
+import Control.Monad.CatchIO (MonadCatchIO(..),bracket)
 import Control.Monad.Fix (MonadFix())
 import Control.Monad.IO.Class (MonadIO(liftIO))
 
@@ -136,19 +139,21 @@ driver ::
     ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driver =
-    case (driverMPI :: Driver MPI shared_configuration supervisor_configuration m n exploration_mode) of
-        Driver runDriver → Driver (runMPI . runDriver)
+    let ?mpi_secret =  error "the MPI secret is not meant to be used as a value"
+    in case (driverMPI :: Driver IO shared_configuration supervisor_configuration m n exploration_mode) of
+        Driver runDriver → Driver runDriver
 {-# INLINE driver #-}
 
-{-| The same as 'driver', but runs in the 'MPI' monad;  use this driver if you
-    want to do other things within 'MPI' (such as starting a subsequent parallel
-    exploration) after the run completes.
+{-| This is the same as 'driver', but it has the 'Network' constraint. Use this 
+    driver if you want to do other things within MPI (such as starting a
+    subseqent parallel exploration) after the run completes.
  -}
 driverMPI ::
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
     , Serialize (WorkerFinishedProgressFor exploration_mode)
-    ) ⇒ Driver MPI shared_configuration supervisor_configuration m n exploration_mode
+    , MPI
+    ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driverMPI = Driver $ \DriverParameters{..} →
     runExplorer
@@ -167,21 +172,25 @@ driverMPI = Driver $ \DriverParameters{..} →
 ------------------------------------- MPI -------------------------------------
 --------------------------------------------------------------------------------
 
-{-| This monad exists in order to ensure that the MPI system is initialized
-    before it is used and finalized when we are done;  all MPI operations are
-    run within it, and it itself is run by using the 'runMPI' function.
- -}
-newtype MPI α = MPI { unwrapMPI :: IO α } deriving (Applicative,Functor,Monad,MonadCatchIO,MonadFix,MonadIO)
+data MPISecret {- This is *not* meant to be exported. -}
 
-{-| Initilizes MPI, runs the 'MPI' action, and then finalizes MPI. -}
-runMPI :: MPI α → IO α
-runMPI action = unwrapMPI $ ((initializeMPI >> action) `finally` finalizeMPI)
+{-| This constraint exists in order to ensure that the MPI system is initialized
+    before it is used and finalized when we are done;  all MPI operations are
+    run with it, and it itself is run by using the 'withMPI' function.
+ -}
+type MPI = ?mpi_secret :: MPISecret
+
+{-| Initilizes MPI, runs the given action, and then finalizes MPI. -}
+withMPI :: (MPI ⇒ IO α) → IO α
+withMPI action =
+    let ?mpi_secret = error "the MPI secret is not meant to be used as a value"
+    in bracket initializeMPI (const finalizeMPI) (const action)
 
 {-| Gets the total number of processes and whether this process is process 0. -}
-getMPIInformation :: MPI (Bool,CInt)
+getMPIInformation :: MPI ⇒ IO (Bool,CInt)
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_getMPIInformation" c_getMPIInformation :: Ptr CInt → Ptr CInt → IO ()
 getMPIInformation = do
-    (i_am_supervisor,number_of_workers) ← liftIO $
+    (i_am_supervisor,number_of_workers) ←
         alloca $ \p_i_am_supervisor →
         alloca $ \p_number_of_workers → do
             c_getMPIInformation p_i_am_supervisor p_number_of_workers
@@ -193,9 +202,9 @@ getMPIInformation = do
     return (i_am_supervisor,number_of_workers)
 
 {-| Receves a message broadcast from process 0 (which must not be this process). -}
-receiveBroadcastMessage :: Serialize α ⇒ MPI α
+receiveBroadcastMessage :: (Serialize α, MPI) ⇒ IO α
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_receiveBroadcastMessage" c_receiveBroadcastMessage :: Ptr (Ptr CChar) → Ptr CInt → IO ()
-receiveBroadcastMessage = liftIO $
+receiveBroadcastMessage =
     alloca $ \p_p_message →
     alloca $ \p_size → do
         c_receiveBroadcastMessage p_p_message p_size
@@ -206,16 +215,16 @@ receiveBroadcastMessage = liftIO $
         return . either error id . decode $ message
 
 {-| Sends a message broadcast from this process, which must be process 0. -}
-sendBroadcastMessage :: Serialize α ⇒ α → MPI ()
+sendBroadcastMessage :: (Serialize α, MPI) ⇒ α → IO ()
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_sendBroadcastMessage" c_sendBroadcastMessage :: Ptr CChar → CInt → IO ()
-sendBroadcastMessage message = liftIO $
+sendBroadcastMessage message =
     unsafeUseAsCStringLen (encode message) $ \(p_message,size) →
         c_sendBroadcastMessage p_message (fromIntegral size)
 
 {-| Sends a message to another process. -}
-sendMessage :: Serialize α ⇒ α → CInt → MPI ()
+sendMessage :: (Serialize α, MPI) ⇒ α → CInt → IO ()
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_sendMessage" c_sendMessage :: Ptr CChar → CInt → CInt → IO ()
-sendMessage message destination = liftIO $
+sendMessage message destination =
     unsafeUseAsCStringLen (encode message) $ \(p_message,size) →
         c_sendMessage p_message (fromIntegral size) destination
 
@@ -223,7 +232,7 @@ sendMessage message destination = liftIO $
     be received;  this function will not block if there are no messages
     available.
  -}
-tryReceiveMessage :: Serialize α ⇒ MPI (Maybe (CInt,α))
+tryReceiveMessage :: (Serialize α, MPI) ⇒ IO (Maybe (CInt,α))
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_tryReceiveMessage" c_tryReceiveMessage :: Ptr CInt → Ptr (Ptr CChar) → Ptr CInt → IO ()
 tryReceiveMessage = liftIO $
     alloca $ \p_source →
@@ -244,11 +253,11 @@ tryReceiveMessage = liftIO $
 --------------------------------- Internal MPI ---------------------------------
 --------------------------------------------------------------------------------
 
-finalizeMPI :: MPI ()
+finalizeMPI :: MPI ⇒ IO ()
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_finalizeMPI" c_finalizeMPI :: IO ()
 finalizeMPI = liftIO c_finalizeMPI
 
-initializeMPI :: MPI ()
+initializeMPI :: MPI ⇒ IO ()
 foreign import ccall unsafe "LogicGrowsOnTrees-MPI.h LogicGrowsOnTrees_MPI_initializeMPI" c_initializeMPI :: IO ()
 initializeMPI = liftIO c_initializeMPI
 
@@ -258,7 +267,7 @@ initializeMPI = liftIO c_initializeMPI
 
 {-| This is the monad in which the MPI controller will run. -}
 newtype MPIControllerMonad exploration_mode α =
-    C (RequestQueueReader exploration_mode CInt MPI α)
+    C (RequestQueueReader exploration_mode CInt IO α)
   deriving (Applicative,Functor,Monad,MonadCatchIO,MonadIO,RequestQueueMonad)
 
 instance HasExplorationMode (MPIControllerMonad exploration_mode) where
@@ -282,19 +291,20 @@ WARNING: Do *NOT* use the threaded runtime with this adapter; see the
          warning in the documentation for this module for more details.
  -}
 
-type MPIMonad exploration_mode = SupervisorMonad exploration_mode CInt MPI
+type MPIMonad exploration_mode = SupervisorMonad exploration_mode CInt IO
 
 {-| This runs the supervisor;  it must be called in process 0. -}
 runSupervisor ::
     ∀ exploration_mode.
     ( Serialize (ProgressFor exploration_mode)
     , Serialize (WorkerFinishedProgressFor exploration_mode)
+    , MPI
     ) ⇒
     CInt {-^ the number of workers -} →
     ExplorationMode exploration_mode {-^ the exploration mode -} →
     ProgressFor exploration_mode {-^ the initial progress of the run -} →
     MPIControllerMonad exploration_mode () {-^ the controller of the supervisor -} →
-    MPI (RunOutcomeFor exploration_mode) {-^ the outcome of the run -}
+    IO (RunOutcomeFor exploration_mode) {-^ the outcome of the run -}
 runSupervisor
     number_of_workers
     exploration_mode
@@ -312,7 +322,7 @@ runSupervisor
 
         sendWorkloadToWorker = sendMessage . StartWorkload
 
-        tryGetRequest :: MPI (Maybe (Either (MPIMonad exploration_mode ()) (CInt,MessageForSupervisorFor exploration_mode)))
+        tryGetRequest :: IO (Maybe (Either (MPIMonad exploration_mode ()) (CInt,MessageForSupervisorFor exploration_mode)))
         tryGetRequest = do
             maybe_message ← tryReceiveMessage
             case maybe_message of
@@ -352,7 +362,7 @@ runSupervisor
     let confirmShutdown remaining_workers
           | Set.null remaining_workers = return ()
           | otherwise =
-            (tryReceiveMessage :: MPI (Maybe (CInt,MessageForSupervisorFor exploration_mode))) >>=
+            (tryReceiveMessage :: IO (Maybe (CInt,MessageForSupervisorFor exploration_mode))) >>=
             maybe (confirmShutdown remaining_workers) (\(worker_id,message) →
                 case message of
                     WorkerQuit → confirmShutdown (Set.delete worker_id remaining_workers)
@@ -366,11 +376,12 @@ runSupervisor
 runWorker ::
     ( Serialize (ProgressFor exploration_mode)
     , Serialize (WorkerFinishedProgressFor exploration_mode)
+    , MPI
     ) ⇒
     ExplorationMode exploration_mode {-^ the mode in to explore the tree -} →
     Purity m n {-^ the purity of the tree -} →
     TreeT m (ResultFor exploration_mode) {-^ the tree -} →
-    MPI ()
+    IO ()
 runWorker
     exploration_mode
     purity
@@ -381,8 +392,8 @@ runWorker
         exploration_mode
         purity
         tree
-        (fix $ \receiveMessage → unwrapMPI tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
-        (unwrapMPI . flip sendMessage 0)
+        (fix $ \receiveMessage → tryReceiveMessage >>= maybe (threadDelay 1 >> receiveMessage) (return . snd))
+        (flip sendMessage 0)
     debugM "Exited worker loop."
 {-# INLINE runWorker #-}
 
@@ -398,6 +409,7 @@ runExplorer ::
     ( Serialize shared_configuration
     , Serialize (ProgressFor exploration_mode)
     , Serialize (WorkerFinishedProgressFor exploration_mode)
+    , MPI
     ) ⇒
     (shared_configuration → ExplorationMode exploration_mode)
         {-^ a function that constructs the exploration mode given the shared
@@ -425,7 +437,7 @@ runExplorer ::
             must at least set the number of workers to be non-zero (called only
             on the supervisor)
          -} →
-    MPI (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor exploration_mode))
+    IO (Maybe ((shared_configuration,supervisor_configuration),RunOutcomeFor exploration_mode))
         {-^ if this process is the supervisor, then the outcome of the run as
             well as the configuration information wrapped in 'Just'; otherwise
             'Nothing'
@@ -446,7 +458,7 @@ runExplorer
                 debugM "I am the supervisor process."
                 debugM "Getting configuration..."
                 configuration@(shared_configuration,supervisor_configuration) ←
-                    liftIO (getConfiguration `onException` unwrapMPI (sendBroadcastMessage (Nothing :: Maybe shared_configuration)))
+                    getConfiguration `onException` sendBroadcastMessage (Nothing :: Maybe shared_configuration)
                 debugM "Broacasting shared configuration..."
                 sendBroadcastMessage (Just shared_configuration)
                 debugM "Initializing global state..."
