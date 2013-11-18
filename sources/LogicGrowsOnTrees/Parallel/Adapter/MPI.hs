@@ -139,9 +139,9 @@ driver ::
     ) ⇒ Driver IO shared_configuration supervisor_configuration m n exploration_mode
  -- Note:  The Monoid constraint should not have been necessary, but the type-checker complains without it.
 driver =
-    let ?mpi_secret =  MPISecret
+    let ?mpi_secret = MPISecret
     in case (driverMPI :: Driver IO shared_configuration supervisor_configuration m n exploration_mode) of
-        Driver runDriver → Driver runDriver
+        Driver runDriver → Driver (\x → withMPI (runDriver x))
 {-# INLINE driver #-}
 
 {-| This is the same as 'driver', but it has the 'Network' constraint. Use this 
