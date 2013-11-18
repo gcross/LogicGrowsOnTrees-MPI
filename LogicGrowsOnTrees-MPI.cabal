@@ -52,7 +52,7 @@ Library
         MonadCatchIO-transformers == 0.3.*,
         stm >= 2.3 && < 2.5,
         transformers >= 0.2 && < 0.4,
-        LogicGrowsOnTrees == 1.0.*
+        LogicGrowsOnTrees >= 1.0 && < 1.2
     Hs-source-dirs: sources
     Extra-libraries: mpi
     C-sources: c-sources/LogicGrowsOnTrees-MPI.c
@@ -80,7 +80,7 @@ Executable count-all-trivial-tree-leavesl
         base > 4 && < 5,
         cmdtheline == 0.2.*,
         hslogger == 1.2.*,
-        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees >= 1.0 && < 1.2,
         LogicGrowsOnTrees-MPI
     Extra-libraries: mpi
     C-sources: c-sources/LogicGrowsOnTrees-MPI.c
@@ -97,7 +97,7 @@ Executable test-trivial
     Build-depends:
         base > 4 && < 5,
         hslogger == 1.2.*,
-        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees >= 1.0 && < 1.2,
         LogicGrowsOnTrees-MPI
     Extra-libraries: mpi
     C-sources: c-sources/LogicGrowsOnTrees-MPI.c
@@ -116,7 +116,7 @@ Executable test-nqueens
         cereal >= 0.3 && < 0.5,
         cmdtheline == 0.2.*,
         hslogger == 1.2.*,
-        LogicGrowsOnTrees == 1.0.*,
+        LogicGrowsOnTrees >= 1.0 && < 1.2,
         LogicGrowsOnTrees-MPI
     Extra-libraries: mpi
     C-sources: c-sources/LogicGrowsOnTrees-MPI.c
