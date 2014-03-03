@@ -79,7 +79,6 @@ import Control.Concurrent (threadDelay)
 import Control.Exception (onException)
 import Control.Monad (liftM2,unless)
 import Control.Monad.CatchIO (MonadCatchIO(..),bracket)
-import Control.Monad.Fix (MonadFix())
 import Control.Monad.IO.Class (MonadIO(liftIO))
 
 import Data.ByteString (packCStringLen)
