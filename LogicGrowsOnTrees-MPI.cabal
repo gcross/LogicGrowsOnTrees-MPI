@@ -1,5 +1,5 @@
 Name:                LogicGrowsOnTrees-MPI
-Version:             1.0.0.1
+Version:             1.0.0.1.1
 License:             BSD3
 License-file:        LICENSE
 Author:              Gregory Crosswhite
@@ -25,7 +25,10 @@ Description:
            for this package by using Cabal's respective
            @--extra-include-dirs=...@ and @--extra-lib-dirs=...@ options.
 
-Extra-source-files:  c-sources/LogicGrowsOnTrees-MPI.c c-sources/LogicGrowsOnTrees-MPI.h
+Extra-source-files:
+    c-sources/LogicGrowsOnTrees-MPI.c
+    c-sources/LogicGrowsOnTrees-MPI.h
+    CHANGELOG.md
 
 Bug-reports: https://github.com/gcross/LogicGrowsOnTrees-MPI/issues
 
@@ -36,7 +39,7 @@ Source-Repository head
 Source-Repository this
     Type:     git
     Location: git://github.com/gcross/LogicGrowsOnTrees-MPI.git
-    Tag:      1.0.0.1
+    Tag:      1.0.0.1.1
 
 Library
     Build-depends:
